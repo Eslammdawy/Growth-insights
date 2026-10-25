@@ -1,4 +1,4 @@
-import { DatasetMeta, DrillChip, brandOptions, itemOptions } from './aggregate';
+import { DatasetMeta, DrillChip, brandOptions, itemOptions, subTypeOptions } from './aggregate';
 import { METRICS, Metric } from './metrics';
 import { PeriodSelection, quarterMonths } from './periods';
 
@@ -12,6 +12,9 @@ export interface ParsedHashState {
   brands?: string[];
   items?: string[];
   mainTypes?: string[];
+  subTypes?: string[];
+  distributors?: string[];
+  territories?: string[];
   txTypes?: ('Sales' | 'Return Sales')[];
   drill?: DrillChip[];
 }
@@ -63,6 +66,21 @@ export function parseHashParams(hashString: string): ParsedHashState {
     if (mt) out.mainTypes = mt.split(',').filter(Boolean);
   }
 
+  if (params.has('subTypes')) {
+    const st = params.get('subTypes')!;
+    if (st) out.subTypes = st.split(',').filter(Boolean);
+  }
+
+  if (params.has('distributors')) {
+    const d = params.get('distributors')!;
+    if (d) out.distributors = d.split(',').filter(Boolean);
+  }
+
+  if (params.has('territories')) {
+    const tr = params.get('territories')!;
+    if (tr) out.territories = tr.split(',').filter(Boolean);
+  }
+
   if (params.has('txTypes')) {
     const tt = params.get('txTypes')!;
     if (tt) {
@@ -106,6 +124,9 @@ export function validateHashAgainstMeta(
   line: string | null;
   period: PeriodSelection;
   mainTypes: string[];
+  subTypes: string[];
+  distributors: string[];
+  territories: string[];
   txTypes: ('Sales' | 'Return Sales')[];
   brands: string[];
   items: string[];
@@ -143,7 +164,20 @@ export function validateHashAgainstMeta(
 
   const mainTypes = parsed.mainTypes
     ? parsed.mainTypes.filter((m) => meta.mainTypes.includes(m))
-    : meta.mainTypes;
+    : [];
+
+  const availableSubTypes = subTypeOptions(meta, mainTypes);
+  const subTypes = parsed.subTypes
+    ? parsed.subTypes.filter((s) => availableSubTypes.includes(s))
+    : [];
+
+  const distributors = parsed.distributors
+    ? parsed.distributors.filter((d) => meta.distributors.includes(d))
+    : [];
+
+  const territories = parsed.territories
+    ? parsed.territories.filter((t) => meta.territories.includes(t))
+    : [];
 
   const txTypes = parsed.txTypes && parsed.txTypes.length > 0
     ? parsed.txTypes
@@ -159,7 +193,7 @@ export function validateHashAgainstMeta(
     ? parsed.items.filter((it) => availableItems.includes(it))
     : [];
 
-  const validDrillFields = new Set(['SubType', 'Chain', 'Distributor', 'Territory', 'Brick', 'Customer']);
+  const validDrillFields = new Set(['SubType', 'Chain', 'Distributor', 'Territory', 'Brick', 'Customer', 'CustomerID', 'Item']);
   const drill = (parsed.drill ?? []).filter((c) => validDrillFields.has(c.field));
 
   return {
@@ -167,6 +201,9 @@ export function validateHashAgainstMeta(
     line,
     period,
     mainTypes,
+    subTypes,
+    distributors,
+    territories,
     txTypes,
     brands,
     items,
@@ -176,9 +213,12 @@ export function validateHashAgainstMeta(
 
 export function serializeHashState(state: {
   metric: Metric;
-  line: string | null;
+  line?: string | null;
   period: PeriodSelection;
   mainTypes: string[];
+  subTypes?: string[];
+  distributors?: string[];
+  territories?: string[];
   txTypes: ('Sales' | 'Return Sales')[];
   brands?: string[];
   items?: string[];
@@ -186,7 +226,7 @@ export function serializeHashState(state: {
 }): string {
   const params = new URLSearchParams();
   if (state.metric) params.set('metric', state.metric);
-  params.set('line', state.line ?? 'all');
+  if (state.line) params.set('line', state.line);
   params.set('year', String(state.period.cyYear));
   params.set('q', String(state.period.quarter));
   if (state.period.month !== null) {
@@ -197,6 +237,15 @@ export function serializeHashState(state: {
   }
   if (state.mainTypes && state.mainTypes.length > 0) {
     params.set('mainTypes', state.mainTypes.join(','));
+  }
+  if (state.subTypes && state.subTypes.length > 0) {
+    params.set('subTypes', state.subTypes.join(','));
+  }
+  if (state.distributors && state.distributors.length > 0) {
+    params.set('distributors', state.distributors.join(','));
+  }
+  if (state.territories && state.territories.length > 0) {
+    params.set('territories', state.territories.join(','));
   }
   if (state.txTypes && (state.txTypes.length !== 2 || !state.txTypes.includes('Sales') || !state.txTypes.includes('Return Sales'))) {
     params.set('txTypes', state.txTypes.join(','));

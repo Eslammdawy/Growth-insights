@@ -6,7 +6,6 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Filters } from '../components/Filters';
 import { KpiCards } from '../components/KpiCards';
 import { LevelTable } from '../components/LevelTable';
-import { Sidebar } from '../components/Sidebar';
 import { TableJumpBar } from '../components/TableJumpBar';
 import { TopBar } from '../components/TopBar';
 import { LEVEL_LABEL, TABLE_LEVELS } from '../lib/aggregate';
@@ -22,16 +21,8 @@ const GrowthChart = React.lazy(() =>
 const BubbleScatterChart = React.lazy(() =>
   import('../components/BubbleScatterChart').then((m) => ({ default: m.BubbleScatterChart }))
 );
-const TerritoryHeatmap = React.lazy(() =>
-  import('../components/TerritoryHeatmap').then((m) => ({ default: m.TerritoryHeatmap }))
-);
 const CyTreemap = React.lazy(() =>
   import('../components/CyTreemap').then((m) => ({ default: m.CyTreemap }))
-);
-const ContributionPriceVolume = React.lazy(() =>
-  import('../components/ContributionPriceVolume').then((m) => ({
-    default: m.ContributionPriceVolume,
-  }))
 );
 
 function ChartSkeleton() {
@@ -95,10 +86,7 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="relative flex min-h-screen bg-gradient-to-br from-indigo-50/90 via-sky-50/70 to-fuchsia-50/60 text-slate-900 dark:from-slate-950 dark:via-indigo-950/60 dark:to-slate-900 dark:text-slate-100">
-      {/* Left Sidebar / Mobile Drawer */}
-      <Sidebar />
-
-      {/* Main Content Area */}
+      {/* Main Content Area (Full Width) */}
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
 
@@ -181,10 +169,10 @@ export const Dashboard: React.FC = () => {
                 </ErrorBoundary>
               </div>
 
-              {/* Collapsible Visual Insights & Phase 4 Decomposition Section */}
+              {/* Collapsible Visual Insights Section */}
               <section
                 id="section-insights"
-                aria-label="Visual Insights and Growth Decomposition"
+                aria-label="Visual Insights"
                 className="space-y-3 scroll-mt-28"
               >
                 <div className="glass-panel flex items-center justify-between rounded-2xl border border-indigo-200/70 bg-gradient-to-r from-indigo-50/80 via-violet-50/50 to-cyan-50/50 px-3.5 py-2 dark:border-slate-800/80 dark:from-slate-900/90 dark:via-indigo-950/40 dark:to-slate-900/90">
@@ -205,10 +193,10 @@ export const Dashboard: React.FC = () => {
                     </button>
                     <span className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 py-0.5 text-xs font-extrabold tracking-wide text-white shadow-sm">
                       <Sparkles className="h-3.5 w-3.5" />
-                      Visual Insights & Growth Decomposition
+                      Visual Insights
                     </span>
                     <span className="hidden text-xs font-medium text-slate-600 dark:text-slate-300 sm:inline">
-                      Bubble Scatter · CY Value Treemap · Territory × Month Heatmap · Price / Volume & Contribution
+                      Bubble Scatter · CY Value Treemap
                     </span>
                   </div>
                   <button
@@ -227,7 +215,7 @@ export const Dashboard: React.FC = () => {
                       analyzing ? 'pointer-events-none opacity-60' : 'opacity-100'
                     }`}
                   >
-                    {/* Row 1: Bubble Scatter + CY Value Treemap */}
+                    {/* Bubble Scatter + CY Value Treemap */}
                     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                       <ErrorBoundary title="PY vs YoY % Bubble Scatter">
                         <Suspense fallback={<ChartSkeleton />}>
@@ -240,20 +228,6 @@ export const Dashboard: React.FC = () => {
                         </Suspense>
                       </ErrorBoundary>
                     </div>
-
-                    {/* Row 2: Territory × Month YoY % Heatmap */}
-                    <ErrorBoundary title="Territory × Month YoY % Heatmap">
-                      <Suspense fallback={<ChartSkeleton />}>
-                        <TerritoryHeatmap />
-                      </Suspense>
-                    </ErrorBoundary>
-
-                    {/* Row 3: Phase 4 Contribution-to-Growth & Price/Volume Cards + Table */}
-                    <ErrorBoundary title="Contribution-to-Growth & Price / Volume Decomposition">
-                      <Suspense fallback={<ChartSkeleton />}>
-                        <ContributionPriceVolume />
-                      </Suspense>
-                    </ErrorBoundary>
                   </div>
                 )}
               </section>

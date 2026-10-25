@@ -65,7 +65,7 @@ export const INSIGHT_LEVEL_LABEL: Record<InsightLevel, string> = {
   item: 'Item',
 };
 
-export type DrillField = 'SubType' | 'Chain' | 'Territory' | 'Brick' | 'CustomerID' | 'Distributor';
+export type DrillField = 'SubType' | 'Chain' | 'Territory' | 'Brick' | 'CustomerID' | 'Distributor' | 'Item';
 export const LEVEL_FIELD: Record<Level, DrillField> = {
   subtype: 'SubType',
   territory: 'Territory',
@@ -80,6 +80,7 @@ export const DRILL_FIELD_LABEL: Record<DrillField, string> = {
   Brick: 'Brick',
   CustomerID: 'Customer',
   Distributor: 'Distributor',
+  Item: 'Item',
 };
 
 /** Cross-filter chip (added from the filter button of a table row). */
@@ -97,7 +98,19 @@ export interface AnalysisQuery {
   brands: string[];
   items: string[];
   mainTypes: string[];
+  subTypes?: string[];
+  distributors?: string[];
+  territories?: string[];
   drill: DrillChip[];
+}
+
+export interface CascadingFilterOptions {
+  mainTypes: string[];
+  subTypes: string[];
+  distributors: string[];
+  territories: string[];
+  brands: string[];
+  items: string[];
 }
 
 export interface GroupRow {
@@ -181,7 +194,9 @@ export interface AnalysisResult {
   insights: AnalysisInsights;
   /** One table per level. */
   levels: Record<Level, GroupRow[]>;
-  /** Per-Line totals for the sidebar badges (respect global filters + drill chips, ignore Line/Brand/Item). */
+  /** Cascading filter options guided by upstream filter selections. */
+  filterOptions: CascadingFilterOptions;
+  /** Per-Line totals for legacy compatibility (respect global filters + drill chips, ignore Line/Brand/Item). */
   lines: LineSummary[];
   linesTotal: Sums;
   matchedRows: number;
@@ -201,6 +216,11 @@ export interface DatasetMeta {
   availability: PeriodAvailability;
   lines: string[];
   mainTypes: string[];
+  subTypes: string[];
+  distributors: string[];
+  territories: string[];
+  /** Unique (mainType, subType) pairs for cascading channel options. */
+  channels: [string, string][];
   /** Unique (line, brand, item) triples for cascading filter options. */
   products: [string, string, string][];
   transactionTypes: { name: string; rows: number; included: boolean }[];
@@ -576,38 +596,78 @@ function computeCustomers(
 
 export function buildMeta(ds: Dataset): DatasetMeta {
   const p = prepare(ds);
-  const { line, brand, item, mainType, transactionType } = p.c;
+  const { line, brand, item, mainType, subType, distributor, territory, transactionType } = p.c;
+  const excludedDistributors = new Set(EXCLUDED_DISTRIBUTORS.map((d) => d.trim().toLowerCase()));
   const triples = new Set<string>();
   const tripleList: [string, string, string][] = [];
+  const channelPairs = new Set<string>();
+  const channelList: [string, string][] = [];
   const lineUsed = new Uint8Array(line.dict.length);
   const mtUsed = new Uint8Array(mainType.dict.length);
+  const stUsed = new Uint8Array(subType.dict.length);
+  const distUsed = new Uint8Array(distributor.dict.length);
+  const terrUsed = new Uint8Array(territory.dict.length);
   const txRows = new Int32Array(transactionType.dict.length);
   for (let i = 0; i < p.n; i++) {
     const it = item.codes[i];
     if (p.itemLine[it] <= 0) continue;
     const l = line.codes[i];
     const b = brand.codes[i];
+    const mt = mainType.codes[i];
+    const st = subType.codes[i];
+    const d = distributor.codes[i];
+    const tr = territory.codes[i];
     lineUsed[l] = 1;
-    mtUsed[mainType.codes[i]] = 1;
+    if (mt > 0) mtUsed[mt] = 1;
+    if (st > 0) stUsed[st] = 1;
+    if (d > 0 && !excludedDistributors.has(distributor.dict[d].trim().toLowerCase())) {
+      distUsed[d] = 1;
+    }
+    if (tr > 0) terrUsed[tr] = 1;
     txRows[transactionType.codes[i]]++;
+    if (mt > 0 && st > 0) {
+      const chKey = `${mt}|${st}`;
+      if (!channelPairs.has(chKey)) {
+        channelPairs.add(chKey);
+        channelList.push([mainType.dict[mt], subType.dict[st]]);
+      }
+    }
     const key = `${l}|${b}|${it}`;
     if (!triples.has(key)) {
       triples.add(key);
       tripleList.push([line.dict[l], brand.dict[b], item.dict[it]]);
     }
   }
-  const used = (col: StrColumn, u: Uint8Array) => col.dict.filter((_, k) => u[k]).sort((a, b) => a.localeCompare(b));
+  const used = (col: StrColumn, u: Uint8Array) => col.dict.filter((_, k) => k > 0 && u[k]).sort((a, b) => a.localeCompare(b));
   return {
     rowCount: p.n,
     columns: ds.columns.map((c) => c.name),
     availability: p.availability,
     lines: used(line, lineUsed),
     mainTypes: used(mainType, mtUsed),
+    subTypes: used(subType, stUsed),
+    distributors: used(distributor, distUsed),
+    territories: used(territory, terrUsed),
+    channels: channelList,
     products: tripleList,
     transactionTypes: transactionType.dict
       .map((name, k) => ({ name: name || UNASSIGNED_LABEL, rows: txRows[k], included: normTx(name) !== null }))
       .filter((t) => t.rows > 0),
   };
+}
+
+/** SubType options cascading from selected MainTypes (all SubTypes when empty). */
+export function subTypeOptions(
+  meta: Pick<DatasetMeta, 'subTypes' | 'channels'>,
+  mainTypes: string[],
+): string[] {
+  if (!mainTypes.length) return meta.subTypes;
+  const ms = new Set(mainTypes);
+  const s = new Set<string>();
+  for (const [mt, st] of meta.channels) {
+    if (ms.has(mt)) s.add(st);
+  }
+  return [...s].sort((a, b) => a.localeCompare(b));
 }
 
 /** Brand options for the active Line (all lines when null). */
@@ -644,6 +704,7 @@ const DRILL_COL: Record<DrillField, keyof Prepared['c']> = {
   Brick: 'brick',
   CustomerID: 'customer',
   Distributor: 'distributor',
+  Item: 'item',
 };
 const LEVEL_COL: Record<Level, keyof Prepared['c']> = {
   subtype: 'subType',
@@ -669,9 +730,19 @@ interface QueryContext {
   pflag: Uint8Array;
   monthOfP: Int32Array;
   txAllowed: Uint8Array;
-  /** Global filters (affect sidebar badges). */
+  /** Drill chip filters. */
+  drillMasks: Masks;
+  /** Channel & Market filters. */
+  mtMask: Uint8Array | null;
+  stMask: Uint8Array | null;
+  distMask: Uint8Array | null;
+  terrMask: Uint8Array | null;
+  /** Product filters. */
+  lineMask: Uint8Array | null;
+  brandMask: Uint8Array | null;
+  itemMask: Uint8Array | null;
+  /** Combined global + product masks for analyzeItems. */
   globalMasks: Masks;
-  /** Product filters (ignored by sidebar badges). */
   productMasks: Masks;
 }
 
@@ -690,23 +761,51 @@ function buildContext(ds: Dataset, query: AnalysisQuery): QueryContext {
   const txAllowed = new Uint8Array(3);
   for (const t of query.txTypes) txAllowed[t === 'Sales' ? 1 : 2] = 1;
 
-  const globalMasks: Masks = [];
-  const mt = mask(c.mainType, query.mainTypes);
-  if (mt) globalMasks.push([c.mainType.codes, mt]);
+  const drillMasks: Masks = [];
   const byField = new Map<DrillField, string[]>();
   for (const chip of query.drill) byField.set(chip.field, [...(byField.get(chip.field) ?? []), chip.value]);
   for (const [field, values] of byField) {
     const col = c[DRILL_COL[field]];
-    globalMasks.push([col.codes, mask(col, values)!]);
+    drillMasks.push([col.codes, mask(col, values)!]);
   }
+
+  const mtMask = mask(c.mainType, query.mainTypes);
+  const stMask = mask(c.subType, query.subTypes);
+  const distMask = mask(c.distributor, query.distributors);
+  const terrMask = mask(c.territory, query.territories);
+
+  const globalMasks: Masks = [...drillMasks];
+  if (mtMask) globalMasks.push([c.mainType.codes, mtMask]);
+  if (stMask) globalMasks.push([c.subType.codes, stMask]);
+  if (distMask) globalMasks.push([c.distributor.codes, distMask]);
+  if (terrMask) globalMasks.push([c.territory.codes, terrMask]);
+
+  const lineMask = query.line === null ? null : mask(c.line, [query.line]);
+  const brandMask = mask(c.brand, query.brands);
+  const itemMask = mask(c.item, query.items);
+
   const productMasks: Masks = [];
-  const lm = query.line === null ? null : mask(c.line, [query.line]);
-  if (lm) productMasks.push([c.line.codes, lm]);
-  const bm = mask(c.brand, query.brands);
-  if (bm) productMasks.push([c.brand.codes, bm]);
-  const im = mask(c.item, query.items);
-  if (im) productMasks.push([c.item.codes, im]);
-  return { p, period, pflag, monthOfP, txAllowed, globalMasks, productMasks };
+  if (lineMask) productMasks.push([c.line.codes, lineMask]);
+  if (brandMask) productMasks.push([c.brand.codes, brandMask]);
+  if (itemMask) productMasks.push([c.item.codes, itemMask]);
+
+  return {
+    p,
+    period,
+    pflag,
+    monthOfP,
+    txAllowed,
+    drillMasks,
+    mtMask,
+    stMask,
+    distMask,
+    terrMask,
+    lineMask,
+    brandMask,
+    itemMask,
+    globalMasks,
+    productMasks,
+  };
 }
 
 interface LevelAcc {
@@ -743,7 +842,21 @@ function toContributionRow(
 
 export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const ctx = buildContext(ds, query);
-  const { p, period, pflag, monthOfP, txAllowed, globalMasks, productMasks } = ctx;
+  const {
+    p,
+    period,
+    pflag,
+    monthOfP,
+    txAllowed,
+    drillMasks,
+    mtMask,
+    stMask,
+    distMask,
+    terrMask,
+    lineMask,
+    brandMask,
+    itemMask,
+  } = ctx;
   const c = p.c;
 
   const lineAcc = new Float64Array(c.line.dict.length * 4);
@@ -754,6 +867,13 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const nItem = c.item.dict.length;
   const itemAcc = new Float64Array(nItem * 4);
   const itemCnt = new Int32Array(nItem);
+
+  const mtUsed = new Uint8Array(c.mainType.dict.length);
+  const stUsed = new Uint8Array(c.subType.dict.length);
+  const distUsed = new Uint8Array(c.distributor.dict.length);
+  const terrUsed = new Uint8Array(c.territory.dict.length);
+  const brandUsed = new Uint8Array(c.brand.dict.length);
+  const itemUsed = new Uint8Array(c.item.dict.length);
 
   const levelAccs: LevelAcc[] = LEVELS.map((level) => {
     const col = c[LEVEL_COL[level]];
@@ -770,6 +890,9 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const childCnt = new Map<number, Int32Array>();
   const chainCodes = c.chain.codes;
   const subCodes = c.subType.codes;
+  const mtCodes = c.mainType.codes;
+  const distCodes = c.distributor.codes;
+  const brandCodes = c.brand.codes;
   const nChain = c.chain.dict.length;
   // Brick → territory weights
   const terrW = new Map<number, Map<number, number>>();
@@ -779,8 +902,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
 
   const { qty, val, tx, periodIdx } = p;
   const lineCodes = c.line.codes;
-  const ng = globalMasks.length;
-  const np = productMasks.length;
+  const nd = drillMasks.length;
   const nl = levelAccs.length;
 
   rows: for (let i = 0; i < p.n; i++) {
@@ -788,7 +910,28 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     const pk = periodIdx[i];
     const f = pflag[pk];
     if (!f) continue;
-    for (let j = 0; j < ng; j++) if (!globalMasks[j][1][globalMasks[j][0][i]]) continue rows;
+    for (let j = 0; j < nd; j++) if (!drillMasks[j][1][drillMasks[j][0][i]]) continue rows;
+
+    // Step 1a: MainType
+    const mt = mtCodes[i];
+    if (mt > 0) mtUsed[mt] = 1;
+    if (mtMask && !mtMask[mt]) continue;
+
+    // Step 1b: SubType (cascaded from MainType)
+    const sg = subCodes[i];
+    if (sg > 0) stUsed[sg] = 1;
+    if (stMask && !stMask[sg]) continue;
+
+    // Step 2a: Distributor (cascaded from Channel)
+    const d = distCodes[i];
+    if (d > 0) distUsed[d] = 1;
+    if (distMask && !distMask[d]) continue;
+
+    // Step 2b: Territory (cascaded from Channel + Distributor)
+    const t = terrCodes[i];
+    if (t > 0) terrUsed[t] = 1;
+    if (terrMask && !terrMask[t]) continue;
+
     const q = qty[i];
     const v = val[i];
     const off = f === 2 ? 2 : 0;
@@ -796,7 +939,19 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     lineAcc[l * 4 + off] += q;
     lineAcc[l * 4 + off + 1] += v;
     lineCnt[l]++;
-    for (let j = 0; j < np; j++) if (!productMasks[j][1][productMasks[j][0][i]]) continue rows;
+
+    if (lineMask && !lineMask[l]) continue;
+
+    // Step 3a: Brand (cascaded from Channel + Market)
+    const b = brandCodes[i];
+    if (b > 0) brandUsed[b] = 1;
+    if (brandMask && !brandMask[b]) continue;
+
+    // Step 3b: Item (cascaded from Channel + Market + Brand)
+    const it = itemCodes[i];
+    if (it > 0) itemUsed[it] = 1;
+    if (itemMask && !itemMask[it]) continue;
+
     matched++;
     if (f === 2) {
       totals.cyQ += q;
@@ -809,12 +964,10 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     monthAcc[m * 4 + off] += q;
     monthAcc[m * 4 + off + 1] += v;
 
-    const t = terrCodes[i];
     const tmIdx = (t * 13 + m) * 4 + off;
     terrMonthAcc[tmIdx] += q;
     terrMonthAcc[tmIdx + 1] += v;
 
-    const it = itemCodes[i];
     itemAcc[it * 4 + off] += q;
     itemAcc[it * 4 + off + 1] += v;
     itemCnt[it]++;
@@ -826,7 +979,6 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
       la.acc[g * 4 + off + 1] += v;
       la.cnt[g]++;
     }
-    const sg = subCodes[i];
     if (expandable[sg]) {
       let ca = childAcc.get(sg);
       if (!ca) {
@@ -846,6 +998,38 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   }
 
   const excludedDistributors = new Set(EXCLUDED_DISTRIBUTORS.map((d) => d.trim().toLowerCase()));
+  const collectOpts = (
+    col: StrColumn,
+    usedArr: Uint8Array,
+    selectedVals?: string[],
+    excludeSet?: Set<string>,
+  ): string[] => {
+    const out = new Set<string>();
+    for (let k = 1; k < col.dict.length; k++) {
+      if (!usedArr[k]) continue;
+      const v = col.dict[k];
+      if (!v) continue;
+      if (excludeSet && excludeSet.has(v.trim().toLowerCase())) continue;
+      out.add(v);
+    }
+    if (selectedVals) {
+      for (const v of selectedVals) {
+        if (v && col.dict.includes(v) && (!excludeSet || !excludeSet.has(v.trim().toLowerCase()))) {
+          out.add(v);
+        }
+      }
+    }
+    return [...out].sort((a, b) => a.localeCompare(b));
+  };
+
+  const filterOptions: CascadingFilterOptions = {
+    mainTypes: collectOpts(c.mainType, mtUsed, query.mainTypes),
+    subTypes: collectOpts(c.subType, stUsed, query.subTypes),
+    distributors: collectOpts(c.distributor, distUsed, query.distributors, excludedDistributors),
+    territories: collectOpts(c.territory, terrUsed, query.territories),
+    brands: collectOpts(c.brand, brandUsed, query.brands),
+    items: collectOpts(c.item, itemUsed, query.items),
+  };
   const levels = {} as Record<Level, GroupRow[]>;
   for (const { level, col, acc, cnt } of levelAccs) {
     const field = LEVEL_FIELD[level];
@@ -1006,6 +1190,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     territoryMonths,
     insights,
     levels,
+    filterOptions,
     lines,
     linesTotal,
     matchedRows: matched,

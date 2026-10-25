@@ -122,7 +122,6 @@ export const CyTreemap: React.FC = () => {
     result,
     theme,
     addDrillRow,
-    setItemsForCurrentLine,
     drill,
     resetFilters,
   } = useDashboardStore(
@@ -130,7 +129,6 @@ export const CyTreemap: React.FC = () => {
       result: s.result,
       theme: s.theme,
       addDrillRow: s.addDrillRow,
-      setItemsForCurrentLine: s.setItemsForCurrentLine,
       drill: s.drill,
       resetFilters: s.resetFilters,
     }))
@@ -164,11 +162,7 @@ export const CyTreemap: React.FC = () => {
 
   const handleSelectTile = (field: DrillField | 'Item', value: string, label: string) => {
     startTransition(() => {
-      if (field === 'Item') {
-        setItemsForCurrentLine([value]);
-      } else {
-        addDrillRow([{ field, value, label }]);
-      }
+      addDrillRow([{ field, value, label }]);
     });
   };
 

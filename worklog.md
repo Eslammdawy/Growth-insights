@@ -66,6 +66,21 @@
   - Items that exist only in PY (`2025`) and have no allocation to any Line in CY (`2026`) receive `lineOfItem[it] = -1`, have their rows excluded (`tx[i] = 0`) from all aggregations (`All Lines`, per-Line badges, KPIs, monthly charts, level tables, and Phase 4 Price/Volume/Mix decomposition), and are omitted from `buildMeta(ds)` (`meta.products`, `brandOptions`, `itemOptions`).
   - Ensures that the sum of the 9 Lines reconciles 100% with the `All Lines` total.
 
+### 1.8 Sidebar Removal & Guided Cascading Filter Flow
+- **Sidebar Removal (`src/pages/Dashboard.tsx`, `src/components/TopBar.tsx`)**:
+  - Removed `src/components/Sidebar.tsx` and the mobile drawer trigger in `TopBar.tsx`, expanding the main report to full viewport width without requiring any Sales Line selection.
+  - Preserved `computeItemAllocations` in `src/lib/aggregate.ts` so baseline report totals remain 100% identical to the active CY portfolio (`All Lines`).
+- **Step-by-Step Guided Filters (`src/components/Filters.tsx`, `src/lib/aggregate.ts`, `src/store/useDashboardStore.ts`)**:
+  - Replaced per-line filter scoping with a 4-step cascading filter bar: **1. Channel** (`MainType` → `SubType`) → **2. Market** (`Distributor` → `Territory`) → **3. Product** (`Brand` → `Item`) → **4. Tx** (`Sales` / `Return Sales`).
+  - Added single-pass `filterOptions: CascadingFilterOptions` computation inside `analyze(ds, query)` so each upstream selection dynamically narrows downstream dropdown options.
+  - Kept chart/table click-to-filter actions (`SubType`, `Chain`, `Distributor`, `Territory`, `Brick`, `Customer`, `Item`) in the separate `DrillChips.tsx` bar below `Filters.tsx`.
+  - Added a `Filters / Top` quick-jump pill to `src/components/TableJumpBar.tsx`.
+
+### 1.9 Removal of Territory × Month Heatmap & Contribution / Price-Volume Section
+- **Visual Insights Streamlining (`src/pages/Dashboard.tsx`)**:
+  - Removed the **Territory × Month YoY % Heatmap** (`TerritoryHeatmap.tsx`) and the **Contribution-to-Growth & Price / Volume Decomposition** section (`ContributionPriceVolume.tsx`) from the report.
+  - Updated the Visual Insights header banner in `Dashboard.tsx` to showcase the remaining 2 visual analytics: **PY vs YoY % Bubble Scatter** (`BubbleScatterChart.tsx`) and **CY Value Treemap** (`CyTreemap.tsx`).
+
 ---
 
 ## 2. Codebase Inventory & Review Status

@@ -6,7 +6,6 @@ import {
   Sun,
   CheckCircle2,
   AlertTriangle,
-  Menu,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { METRICS, METRIC_LABEL } from '../lib/metrics';
@@ -26,7 +25,6 @@ export const TopBar: React.FC = () => {
     theme,
     toggleTheme,
     analyzing,
-    setMobileDrawerOpen,
   } = useDashboardStore(
     useShallow((s) => ({
       meta: s.meta,
@@ -39,7 +37,6 @@ export const TopBar: React.FC = () => {
       theme: s.theme,
       toggleTheme: s.toggleTheme,
       analyzing: s.analyzing,
-      setMobileDrawerOpen: s.setMobileDrawerOpen,
     }))
   );
 
@@ -58,14 +55,6 @@ export const TopBar: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Brand & Period Banner */}
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setMobileDrawerOpen(true)}
-            aria-label="Open sales lines navigation"
-            className="rounded-xl border border-indigo-200/80 bg-white/80 p-2 text-indigo-700 hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-indigo-200 dark:hover:bg-slate-800 md:hidden focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <Menu className="h-4 w-4" />
-          </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="bg-gradient-to-r from-indigo-700 via-violet-600 to-cyan-600 bg-clip-text text-base font-extrabold tracking-tight text-transparent dark:from-indigo-300 dark:via-violet-300 dark:to-cyan-300">

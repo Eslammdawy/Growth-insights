@@ -18,6 +18,7 @@ import {
   buildMeta,
   brandOptions,
   itemOptions,
+  subTypeOptions,
   sumRows,
 } from './aggregate';
 import {
@@ -558,5 +559,46 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     // Filtering by Capital 3 includes the reallocated PY and earlier CY rows of Ampofer
     const cap3Res = analyze(reallocDs, { ...q, line: 'Capital 3' });
     expect(cap3Res.totals).toEqual({ pyQ: 100, pyV: 10000, cyQ: 150, cyV: 15000 });
+  });
+
+  it('17. Guided cascading filters (Channel -> Market -> Product) narrow downstream options and filter totals without line selection', () => {
+    const baseline = analyze(sampleDs, baseQuery());
+    expect(baseline.filterOptions.mainTypes.length).toBeGreaterThan(0);
+    expect(baseline.filterOptions.subTypes.length).toBeGreaterThan(0);
+    expect(baseline.filterOptions.distributors.length).toBeGreaterThan(0);
+    expect(baseline.filterOptions.territories.length).toBeGreaterThan(0);
+    expect(baseline.filterOptions.brands.length).toBeGreaterThan(0);
+    expect(baseline.filterOptions.items.length).toBeGreaterThan(0);
+
+    const chosenMt = sampleMeta.mainTypes[0];
+    const validSubs = subTypeOptions(sampleMeta, [chosenMt]);
+    expect(validSubs.length).toBeGreaterThan(0);
+
+    const step1 = analyze(sampleDs, baseQuery({ mainTypes: [chosenMt], subTypes: [validSubs[0]] }));
+    expect(step1.totals.cyV).toBeLessThanOrEqual(baseline.totals.cyV);
+    expect(step1.filterOptions.subTypes).toEqual(validSubs);
+    expect(step1.filterOptions.distributors.length).toBeGreaterThan(0);
+
+    const chosenDist = step1.filterOptions.distributors[0];
+    const step2 = analyze(
+      sampleDs,
+      baseQuery({
+        mainTypes: [chosenMt],
+        subTypes: [validSubs[0]],
+        distributors: [chosenDist],
+      }),
+    );
+    expect(step2.totals.cyV).toBeLessThanOrEqual(step1.totals.cyV);
+    expect(step2.filterOptions.territories.length).toBeGreaterThan(0);
+
+    // Item drill chip works in separate DrillChips path
+    const chosenItem = step2.filterOptions.items[0];
+    const withItemDrill = analyze(
+      sampleDs,
+      baseQuery({
+        drill: [{ field: 'Item', value: chosenItem, label: chosenItem }],
+      }),
+    );
+    expect(withItemDrill.totals.cyV).toBeLessThan(baseline.totals.cyV);
   });
 });

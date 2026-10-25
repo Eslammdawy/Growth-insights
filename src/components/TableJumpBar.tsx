@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Sparkles } from 'lucide-react';
+import { ArrowUp, Compass, Layers, Sparkles } from 'lucide-react';
 import { LEVEL_LABEL, TABLE_LEVELS, Level } from '../lib/aggregate';
 
 const JUMP_PILL_STYLE: Record<Level, string> = {
@@ -34,6 +34,15 @@ export const TableJumpBar: React.FC = () => {
           Jump to:
         </span>
         <div className="flex items-center gap-1.5 text-xs">
+          <button
+            type="button"
+            onClick={() => scrollToElement('section-filters')}
+            className="inline-flex items-center gap-1 rounded-xl border border-indigo-500/35 bg-indigo-500/10 px-3 py-1 font-bold text-indigo-800 shadow-sm transition-all hover:bg-indigo-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-indigo-200 dark:hover:bg-indigo-600"
+          >
+            <Compass className="h-3 w-3" />
+            Filters / Top
+            <ArrowUp className="h-3 w-3 opacity-80" />
+          </button>
           <button
             type="button"
             onClick={() => scrollToElement('section-insights')}
