@@ -5,6 +5,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -69,6 +70,7 @@ export const GrowthChart: React.FC = () => {
           val,
           delta: d.delta,
           growth: d.growth,
+          growthText: fmtGrowth(d.growth),
         };
       })
       .filter((x) => Number.isFinite(x.val) && x.val !== 0);
@@ -244,7 +246,7 @@ export const GrowthChart: React.FC = () => {
             <BarChart
               data={chartData}
               layout="vertical"
-              margin={{ top: 2, right: 20, left: 8, bottom: 0 }}
+              margin={{ top: 2, right: 54, left: 8, bottom: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke={gridColor} horizontal={false} />
               <XAxis
@@ -253,6 +255,10 @@ export const GrowthChart: React.FC = () => {
                 tick={{ fill: axisColor, fontSize: 10 }}
                 axisLine={{ stroke: gridColor }}
                 tickLine={false}
+                domain={[
+                  (dataMin: number) => (dataMin < 0 ? dataMin * 1.15 : 0),
+                  (dataMax: number) => (dataMax > 0 ? dataMax * 1.15 : 0),
+                ]}
               />
               <YAxis
                 type="category"
@@ -294,6 +300,52 @@ export const GrowthChart: React.FC = () => {
                     }
                   />
                 ))}
+                <LabelList
+                  content={(props: {
+                    x?: number | string;
+                    y?: number | string;
+                    width?: number | string;
+                    height?: number | string;
+                    index?: number;
+                  }) => {
+                    const { x = 0, y = 0, width = 0, height = 0, index = 0 } = props;
+                    const entry = chartData[index];
+                    if (!entry || !entry.growthText) return null;
+                    const numX = Number(x);
+                    const numY = Number(y);
+                    const numW = Number(width);
+                    const numH = Number(height);
+                    const isPos = numW >= 0;
+                    const posX = isPos ? numX + numW + 6 : numX + numW - 6;
+                    const anchor = isPos ? 'start' : 'end';
+                    const isGrowthPositive =
+                      entry.growth.kind === 'pct'
+                        ? entry.growth.value >= 0
+                        : entry.growth.kind === 'new';
+                    const fill = isGrowthPositive
+                      ? isDark
+                        ? SHARED_PALETTE.upLight
+                        : SHARED_PALETTE.up
+                      : isDark
+                        ? SHARED_PALETTE.downLight
+                        : SHARED_PALETTE.down;
+
+                    return (
+                      <text
+                        x={posX}
+                        y={numY + numH / 2}
+                        textAnchor={anchor}
+                        dominantBaseline="central"
+                        fill={fill}
+                        fontSize={10}
+                        fontWeight={700}
+                        className="tabular-nums select-none"
+                      >
+                        {entry.growthText}
+                      </text>
+                    );
+                  }}
+                />
               </Bar>
             </BarChart>
           </ResponsiveContainer>

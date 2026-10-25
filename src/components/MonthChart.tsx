@@ -4,6 +4,7 @@ import {
   Bar,
   CartesianGrid,
   ComposedChart,
+  LabelList,
   Legend,
   Line,
   ResponsiveContainer,
@@ -218,7 +219,7 @@ export const MonthChart: React.FC = () => {
       ) : (
         <div className="h-[280px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
+            <ComposedChart data={data} margin={{ top: 22, right: 12, left: 4, bottom: 0 }}>
               <defs>
                 <linearGradient id="monthPyGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.95} />
@@ -243,6 +244,7 @@ export const MonthChart: React.FC = () => {
                 axisLine={false}
                 tickLine={false}
                 width={54}
+                domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.16)]}
               />
               <YAxis
                 yAxisId="right"
@@ -309,8 +311,28 @@ export const MonthChart: React.FC = () => {
                       : 'YoY Growth %'
                 }
               />
-              <Bar yAxisId="left" dataKey="PY" fill="url(#monthPyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34} />
-              <Bar yAxisId="left" dataKey="CY" fill="url(#monthCyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34} />
+              <Bar yAxisId="left" dataKey="PY" fill="url(#monthPyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34}>
+                <LabelList
+                  dataKey="PY"
+                  position="top"
+                  offset={6}
+                  formatter={(val: number) => (val > 0 ? fmtCompact(val) : '')}
+                  fontSize={10}
+                  fontWeight={700}
+                  fill={isDark ? '#c4b5fd' : '#6d28d9'}
+                />
+              </Bar>
+              <Bar yAxisId="left" dataKey="CY" fill="url(#monthCyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34}>
+                <LabelList
+                  dataKey="CY"
+                  position="top"
+                  offset={6}
+                  formatter={(val: number) => (val > 0 ? fmtCompact(val) : '')}
+                  fontSize={10}
+                  fontWeight={700}
+                  fill={isDark ? '#67e8f9' : '#0284c7'}
+                />
+              </Bar>
               <Line
                 yAxisId="right"
                 type="monotone"

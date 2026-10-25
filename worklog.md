@@ -81,6 +81,17 @@
   - Removed the **Territory × Month YoY % Heatmap** (`TerritoryHeatmap.tsx`) and the **Contribution-to-Growth & Price / Volume Decomposition** section (`ContributionPriceVolume.tsx`) from the report.
   - Updated the Visual Insights header banner in `Dashboard.tsx` to showcase the remaining 2 visual analytics: **PY vs YoY % Bubble Scatter** (`BubbleScatterChart.tsx`) and **CY Value Treemap** (`CyTreemap.tsx`).
 
+### 1.10 Outside-End Data Labels for YoY Growth & Monthly Trend Charts
+- **Top 10 YoY Δ / YoY % Chart (`src/components/GrowthChart.tsx`)**:
+  - Added Recharts `<LabelList>` rendered outside the end of each horizontal bar showing the formatted `YoY %` rate (`fmtGrowth(d.growth)`).
+  - Dynamically handles both positive (`numW >= 0`, `textAnchor="start"`, offset +6px to the right) and negative bars (`numW < 0`, `textAnchor="end"`, offset -6px to the left).
+  - Color-codes data labels using the Okabe-Ito shared palette tokens (`up`/`upLight` for positive growth, `down`/`downLight` for negative growth) in bold tabular numerals.
+  - Expanded X-axis domain with 15% headroom (`domain={[(min) => min < 0 ? min * 1.15 : 0, (max) => max > 0 ? max * 1.15 : 0]}`) and right margin to 54px to prevent label clipping.
+- **Monthly Trend Chart (`src/components/MonthChart.tsx`)**:
+  - Added Recharts `<LabelList>` with `position="top"` on both `PY` and `CY` bars to display unit/value metrics at the outside end formatted compactly (`fmtCompact(val)`).
+  - Styled with high-contrast, theme-aware colors matching each bar series (violet for PY, cyan/sky for CY).
+  - Added domain headroom (`domain={[0, (max) => Math.ceil(max * 1.16)]}`) on the left Y-axis and expanded chart top margin to 22px to give labels comfortable breathing room below the YoY % line overlay.
+
 ---
 
 ## 2. Codebase Inventory & Review Status
