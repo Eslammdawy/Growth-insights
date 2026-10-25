@@ -22,6 +22,8 @@ import {
 export type Level = 'subtype' | 'territory' | 'brick' | 'customer' | 'distributor';
 /** Display order of the level tables on the dashboard. */
 export const LEVELS: Level[] = ['subtype', 'distributor', 'territory', 'brick', 'customer'];
+/** Display order of the level tables rendered on the dashboard. */
+export const TABLE_LEVELS: Level[] = ['subtype', 'distributor', 'territory', 'customer'];
 export const LEVEL_LABEL: Record<Level, string> = {
   subtype: 'SubType',
   territory: 'Territory',

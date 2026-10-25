@@ -1,6 +1,6 @@
 import React from 'react';
 import { Layers } from 'lucide-react';
-import { LEVEL_LABEL, LEVELS, Level } from '../lib/aggregate';
+import { LEVEL_LABEL, TABLE_LEVELS, Level } from '../lib/aggregate';
 
 export const TableJumpBar: React.FC = () => {
   const scrollToTable = (level: Level) => {
@@ -21,7 +21,7 @@ export const TableJumpBar: React.FC = () => {
           Jump to:
         </span>
         <div className="flex items-center gap-1 text-xs">
-          {LEVELS.map((lvl, idx) => (
+          {TABLE_LEVELS.map((lvl, idx) => (
             <React.Fragment key={lvl}>
               {idx > 0 && <span className="text-slate-300 dark:text-slate-700 select-none">·</span>}
               <button
@@ -36,7 +36,7 @@ export const TableJumpBar: React.FC = () => {
         </div>
       </div>
       <span className="hidden text-[11px] text-slate-400 dark:text-slate-500 md:inline">
-        5 levels stacked
+        4 levels stacked
       </span>
     </nav>
   );
