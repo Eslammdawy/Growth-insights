@@ -11,6 +11,7 @@ import {
 import { EXPANDABLE_SUBTYPES, TX_TYPES, UNASSIGNED_CHAIN_LABEL } from './config';
 import {
   AnalysisQuery,
+  INSIGHT_LEVELS,
   LEVELS,
   analyze,
   analyzeItems,
@@ -21,11 +22,13 @@ import {
 } from './aggregate';
 import {
   METRICS,
+  decomposePriceVolume,
   deriveRow,
   growth,
   metricCells,
+  priceVolumeRow,
 } from './metrics';
-import { fmtGrowth } from './format';
+import { fmtGrowth, fmtPrice, fmtSignedPrice } from './format';
 import { defaultSelection } from './periods';
 import { parseHashParams, serializeHashState, validateHashAgainstMeta } from './hashState';
 
@@ -325,5 +328,139 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(safeValidated.period.month).toBeNull();
     expect(safeValidated.txTypes).toEqual(['Sales', 'Return Sales']);
     expect(safeValidated.drill).toEqual([]);
+  });
+
+  it('13. Territory × Month matrix (Visual 2) reconciles horizontally to Territory totals and vertically to Month buckets', () => {
+    const res = analyze(sampleDs, baseQuery());
+    expect(res.territoryMonths.length).toBe(res.levels.territory.length);
+
+    // Horizontal check: sum across months for each territory equals territory.sums
+    for (const tm of res.territoryMonths) {
+      const mSums = tm.months.reduce(
+        (acc, b) => ({
+          pyQ: acc.pyQ + b.sums.pyQ,
+          pyV: acc.pyV + b.sums.pyV,
+          cyQ: acc.cyQ + b.sums.cyQ,
+          cyV: acc.cyV + b.sums.cyV,
+        }),
+        { pyQ: 0, pyV: 0, cyQ: 0, cyV: 0 },
+      );
+      expect(mSums.pyQ).toBeCloseTo(tm.sums.pyQ, 6);
+      expect(mSums.pyV).toBeCloseTo(tm.sums.pyV, 4);
+      expect(mSums.cyQ).toBeCloseTo(tm.sums.cyQ, 6);
+      expect(mSums.cyV).toBeCloseTo(tm.sums.cyV, 4);
+    }
+
+    // Vertical check: sum across territories for each month index equals res.months[idx].sums
+    for (let mIdx = 0; mIdx < res.months.length; mIdx++) {
+      const colSums = res.territoryMonths.reduce(
+        (acc, tm) => ({
+          pyQ: acc.pyQ + tm.months[mIdx].sums.pyQ,
+          pyV: acc.pyV + tm.months[mIdx].sums.pyV,
+          cyQ: acc.cyQ + tm.months[mIdx].sums.cyQ,
+          cyV: acc.cyV + tm.months[mIdx].sums.cyV,
+        }),
+        { pyQ: 0, pyV: 0, cyQ: 0, cyV: 0 },
+      );
+      expect(colSums.pyQ).toBeCloseTo(res.months[mIdx].sums.pyQ, 6);
+      expect(colSums.pyV).toBeCloseTo(res.months[mIdx].sums.pyV, 4);
+      expect(colSums.cyQ).toBeCloseTo(res.months[mIdx].sums.cyQ, 6);
+      expect(colSums.cyV).toBeCloseTo(res.months[mIdx].sums.cyV, 4);
+    }
+  });
+
+  it('14. Phase 4 Contribution-to-Growth (pp) and CY Share reconcile across all non-excluded insight levels', () => {
+    const res = analyze(sampleDs, baseQuery());
+    const totalGrowthV_pp = ((res.totals.cyV - res.totals.pyV) / res.totals.pyV) * 100;
+    const totalGrowthQ_pp = ((res.totals.cyQ - res.totals.pyQ) / res.totals.pyQ) * 100;
+
+    for (const lvl of INSIGHT_LEVELS.filter((l) => l !== 'distributor')) {
+      const rows = res.insights.byLevel[lvl];
+      expect(rows.length).toBeGreaterThan(0);
+
+      const sumContribV = rows.reduce((s, r) => s + (r.valueContribPp ?? 0), 0);
+      const sumContribQ = rows.reduce((s, r) => s + (r.unitsContribPp ?? 0), 0);
+      const sumShareV = rows.reduce((s, r) => s + (r.valueShareCy ?? 0), 0);
+      const sumShareQ = rows.reduce((s, r) => s + (r.unitsShareCy ?? 0), 0);
+
+      expect(sumContribV).toBeCloseTo(totalGrowthV_pp, 6);
+      expect(sumContribQ).toBeCloseTo(totalGrowthQ_pp, 6);
+      expect(sumShareV).toBeCloseTo(1.0, 6);
+      expect(sumShareQ).toBeCloseTo(1.0, 6);
+    }
+  });
+
+  it('15. Phase 4 Price / Volume / Mix decomposition satisfies exact additivity and handles edge cases', () => {
+    const res = analyze(sampleDs, baseQuery());
+    const pvm = res.insights.pvmSummary;
+
+    // Total delta equals volumeEffect + priceEffect + newEffect + lostEffect
+    expect(pvm.volumeEffect + pvm.priceEffect + pvm.newEffect + pvm.lostEffect).toBeCloseTo(
+      pvm.totalDeltaV,
+      4,
+    );
+    expect(pvm.totalDeltaV).toBeCloseTo(res.totals.cyV - res.totals.pyV, 4);
+
+    // Pure Volume + Mix equals total Volume Effect
+    expect(pvm.pureVolumeEffect + pvm.mixEffect).toBeCloseTo(pvm.volumeEffect, 4);
+
+    // Every insight level's PVM summary also satisfies additivity
+    for (const lvl of INSIGHT_LEVELS.filter((l) => l !== 'distributor')) {
+      const lPvm = res.insights.levelPvmSummary[lvl];
+      expect(
+        lPvm.volumeEffect + lPvm.priceEffect + lPvm.newEffect + lPvm.lostEffect,
+      ).toBeCloseTo(lPvm.totalDeltaV, 4);
+      expect(lPvm.pureVolumeEffect + lPvm.mixEffect).toBeCloseTo(lPvm.volumeEffect, 4);
+    }
+
+    // Direct unit tests for edge cases:
+    // 1) Continuing business: PY=(100u, 1000 EGP -> 10 EGP/u), CY=(120u, 1500 EGP -> 12.5 EGP/u)
+    // Vol effect = (120 - 100) * 10 = +200; Price effect = 120 * (12.5 - 10) = +300; Total = +500
+    const cont = priceVolumeRow({ pyQ: 100, pyV: 1000, cyQ: 120, cyV: 1500 }, 1000);
+    expect(cont.pyPrice).toBeCloseTo(10, 6);
+    expect(cont.cyPrice).toBeCloseTo(12.5, 6);
+    expect(cont.volumeEffect).toBeCloseTo(200, 6);
+    expect(cont.priceEffect).toBeCloseTo(300, 6);
+    expect(cont.newEffect).toBe(0);
+    expect(cont.lostEffect).toBe(0);
+
+    // 2) New item (PY=0, CY>0): entire delta in newEffect
+    const newRow = priceVolumeRow({ pyQ: 0, pyV: 0, cyQ: 50, cyV: 750 }, 1000);
+    expect(newRow.pyPrice).toBeNull();
+    expect(newRow.cyPrice).toBeCloseTo(15, 6);
+    expect(newRow.newEffect).toBeCloseTo(750, 6);
+    expect(newRow.volumeEffect).toBe(0);
+    expect(newRow.priceEffect).toBe(0);
+    expect(newRow.lostEffect).toBe(0);
+
+    // 3) Lost item (PY>0, CY=0): entire delta in lostEffect
+    const lostRow = priceVolumeRow({ pyQ: 80, pyV: 800, cyQ: 0, cyV: 0 }, 1000);
+    expect(lostRow.pyPrice).toBeCloseTo(10, 6);
+    expect(lostRow.cyPrice).toBeNull();
+    expect(lostRow.lostEffect).toBeCloseTo(-800, 6);
+    expect(lostRow.volumeEffect).toBe(0);
+    expect(lostRow.priceEffect).toBe(0);
+    expect(lostRow.newEffect).toBe(0);
+
+    // 4) Negative / returns-netted values
+    const negRow = priceVolumeRow({ pyQ: 100, pyV: 1000, cyQ: -10, cyV: -120 }, 1000);
+    expect(
+      negRow.volumeEffect + negRow.priceEffect + negRow.newEffect + negRow.lostEffect,
+    ).toBeCloseTo(negRow.totalDeltaV, 6);
+
+    // 5) Empty selection (both 0)
+    const emptySummary = decomposePriceVolume([]);
+    expect(emptySummary.totalDeltaV).toBe(0);
+    expect(emptySummary.volumeEffect).toBe(0);
+    expect(emptySummary.priceEffect).toBe(0);
+    expect(emptySummary.pureVolumeEffect).toBe(0);
+    expect(emptySummary.mixEffect).toBe(0);
+
+    // Price formatters
+    expect(fmtPrice(12.5)).toBe('EGP 12.50');
+    expect(fmtPrice(12.5, false)).toBe('12.50');
+    expect(fmtPrice(null)).toBe('–');
+    expect(fmtSignedPrice(2.5, false)).toBe('+2.50');
+    expect(fmtSignedPrice(-2.5, false)).toBe('−2.50');
   });
 });

@@ -24,6 +24,19 @@ export function fmtValue(x: number | null | undefined, withCurrency = true): str
   return withCurrency ? `EGP ${s}` : s;
 }
 
+export function fmtPrice(x: number | null | undefined, withCurrency = true): string {
+  if (x === null || x === undefined || !Number.isFinite(x)) return DASH;
+  const s = nf2.format(clean(x));
+  return withCurrency ? `EGP ${s}` : s;
+}
+
+export function fmtSignedPrice(x: number | null | undefined, withCurrency = true): string {
+  if (x === null || x === undefined || !Number.isFinite(x)) return DASH;
+  const v = clean(x);
+  const s = fmtPrice(Math.abs(v), withCurrency);
+  return v > 0 ? `+${s}` : v < 0 ? `−${s}` : s;
+}
+
 export function fmtMetric(x: number | null | undefined, m: Metric, withCurrency = true): string {
   if (m === 'units') return fmtUnits(x);
   return fmtValue(x, withCurrency);

@@ -44,8 +44,10 @@ export default {
         ':root': {
           '--color-up': theme('colors.up.DEFAULT'),
           '--color-up-light': theme('colors.up.light'),
+          '--color-up-vivid': theme('colors.up.vivid'),
           '--color-down': theme('colors.down.DEFAULT'),
           '--color-down-light': theme('colors.down.light'),
+          '--color-down-vivid': theme('colors.down.vivid'),
         },
       });
     },

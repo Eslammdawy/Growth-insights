@@ -15,7 +15,18 @@ import {
   UNASSIGNED_LABEL,
 } from './config';
 import { Dataset, StrColumn, numCol, strCol } from './columnar';
-import { Sums, emptySums } from './metrics';
+import {
+  Growth,
+  PriceVolumeRow,
+  PriceVolumeSummary,
+  Sums,
+  contributionPp,
+  decomposePriceVolume,
+  emptySums,
+  growth,
+  priceVolumeRow,
+  shareOfTotal,
+} from './metrics';
 import {
   MONTH_ABBR,
   PeriodAvailability,
@@ -36,6 +47,16 @@ export const LEVEL_LABEL: Record<Level, string> = {
   brick: 'Brick',
   customer: 'Customer',
   distributor: 'Distributor',
+};
+
+export type InsightLevel = 'subtype' | 'distributor' | 'territory' | 'brick' | 'item';
+export const INSIGHT_LEVELS: InsightLevel[] = ['subtype', 'distributor', 'territory', 'brick', 'item'];
+export const INSIGHT_LEVEL_LABEL: Record<InsightLevel, string> = {
+  subtype: 'SubType',
+  distributor: 'Distributor',
+  territory: 'Territory',
+  brick: 'Brick',
+  item: 'Item',
 };
 
 export type DrillField = 'SubType' | 'Chain' | 'Territory' | 'Brick' | 'CustomerID' | 'Distributor';
@@ -108,10 +129,50 @@ export interface MonthPoint {
   sums: Sums;
 }
 
+export interface TerritoryMonthRow {
+  territory: string;
+  label: string;
+  sums: Sums;
+  months: MonthPoint[];
+}
+
+/** Phase 4 row-level Contribution-to-Growth & Price/Volume decomposition result. */
+export interface ContributionRow {
+  id: string;
+  field: DrillField | 'Item';
+  value: string;
+  label: string;
+  brand?: string;
+  sums: Sums;
+  unitsDelta: number;
+  valueDelta: number;
+  unitsGrowth: Growth;
+  valueGrowth: Growth;
+  unitsShareCy: number | null;
+  valueShareCy: number | null;
+  unitsContribPp: number | null;
+  valueContribPp: number | null;
+  pvm: PriceVolumeRow;
+}
+
+/** Phase 4 precomputed growth decomposition & contribution results. */
+export interface AnalysisInsights {
+  /** Item-level portfolio Price / Volume / Mix summary. */
+  pvmSummary: PriceVolumeSummary;
+  /** Per-level Price / Volume / Mix summary. */
+  levelPvmSummary: Record<InsightLevel, PriceVolumeSummary>;
+  /** Per-level contribution & price/volume rows. */
+  byLevel: Record<InsightLevel, ContributionRow[]>;
+}
+
 export interface AnalysisResult {
   period: ResolvedPeriod;
   totals: Sums;
   months: MonthPoint[];
+  /** Territory × Month sums for the YoY % heatmap. */
+  territoryMonths: TerritoryMonthRow[];
+  /** Phase 4 contribution-to-growth and price/volume decomposition results. */
+  insights: AnalysisInsights;
   /** One table per level. */
   levels: Record<Level, GroupRow[]>;
   /** Per-Line totals for the sidebar badges (respect global filters + drill chips, ignore Line/Brand/Item). */
@@ -191,7 +252,14 @@ export const CUSTOMER_KEY_SEP = '\u241F';
 export function normTx(s: string): TxType | null {
   const k = s.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
   if (k === 'sales' || k === 'sale') return 'Sales';
-  if (k === 'return sales' || k === 'returns sales' || k === 'return sale' || k === 'sales return' || k === 'sales returns') return 'Return Sales';
+  if (
+    k === 'return sales' ||
+    k === 'returns sales' ||
+    k === 'return sale' ||
+    k === 'sales return' ||
+    k === 'sales returns'
+  )
+    return 'Return Sales';
   return null;
 }
 
@@ -490,7 +558,12 @@ const LEVEL_COL: Record<Level, keyof Prepared['c']> = {
   distributor: 'distributor',
 };
 
-const sumsAt = (a: Float64Array, k: number): Sums => ({ pyQ: a[k * 4], pyV: a[k * 4 + 1], cyQ: a[k * 4 + 2], cyV: a[k * 4 + 3] });
+const sumsAt = (a: Float64Array, k: number): Sums => ({
+  pyQ: a[k * 4],
+  pyV: a[k * 4 + 1],
+  cyQ: a[k * 4 + 2],
+  cyV: a[k * 4 + 3],
+});
 
 type Masks = [Int32Array, Uint8Array][];
 
@@ -548,6 +621,31 @@ interface LevelAcc {
   cnt: Int32Array;
 }
 
+function toContributionRow(
+  r: GroupRow,
+  totalSums: Sums,
+): ContributionRow {
+  const unitsDelta = r.sums.cyQ - r.sums.pyQ;
+  const valueDelta = r.sums.cyV - r.sums.pyV;
+  return {
+    id: r.id,
+    field: r.field,
+    value: r.value,
+    label: r.label,
+    brand: r.brand,
+    sums: r.sums,
+    unitsDelta,
+    valueDelta,
+    unitsGrowth: growth(r.sums.pyQ, r.sums.cyQ),
+    valueGrowth: growth(r.sums.pyV, r.sums.cyV),
+    unitsShareCy: shareOfTotal(r.sums.cyQ, totalSums.cyQ),
+    valueShareCy: shareOfTotal(r.sums.cyV, totalSums.cyV),
+    unitsContribPp: contributionPp(unitsDelta, totalSums.pyQ),
+    valueContribPp: contributionPp(valueDelta, totalSums.pyV),
+    pvm: priceVolumeRow(r.sums, totalSums.pyV),
+  };
+}
+
 export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const ctx = buildContext(ds, query);
   const { p, period, pflag, monthOfP, txAllowed, globalMasks, productMasks } = ctx;
@@ -556,6 +654,12 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const lineAcc = new Float64Array(c.line.dict.length * 4);
   const lineCnt = new Int32Array(c.line.dict.length);
   const monthAcc = new Float64Array(13 * 4);
+  const nTerr = c.territory.dict.length;
+  const terrMonthAcc = new Float64Array(nTerr * 13 * 4);
+  const nItem = c.item.dict.length;
+  const itemAcc = new Float64Array(nItem * 4);
+  const itemCnt = new Int32Array(nItem);
+
   const levelAccs: LevelAcc[] = LEVELS.map((level) => {
     const col = c[LEVEL_COL[level]];
     return { level, col, acc: new Float64Array(col.dict.length * 4), cnt: new Int32Array(col.dict.length) };
@@ -576,6 +680,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const terrW = new Map<number, Map<number, number>>();
   const brickCodes = c.brick.codes;
   const terrCodes = c.territory.codes;
+  const itemCodes = c.item.codes;
 
   const { qty, val, tx, periodIdx } = p;
   const lineCodes = c.line.codes;
@@ -608,6 +713,17 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     const m = monthOfP[pk];
     monthAcc[m * 4 + off] += q;
     monthAcc[m * 4 + off + 1] += v;
+
+    const t = terrCodes[i];
+    const tmIdx = (t * 13 + m) * 4 + off;
+    terrMonthAcc[tmIdx] += q;
+    terrMonthAcc[tmIdx + 1] += v;
+
+    const it = itemCodes[i];
+    itemAcc[it * 4 + off] += q;
+    itemAcc[it * 4 + off + 1] += v;
+    itemCnt[it]++;
+
     for (let j = 0; j < nl; j++) {
       const la = levelAccs[j];
       const g = la.col.codes[i];
@@ -631,7 +747,6 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     const bg = brickCodes[i];
     let tm = terrW.get(bg);
     if (!tm) terrW.set(bg, (tm = new Map()));
-    const t = terrCodes[i];
     tm.set(t, (tm.get(t) ?? 0) + Math.abs(v) + 1e-6);
   }
 
@@ -676,7 +791,10 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
         let bw = -1;
         for (const [t, w] of tm) if (w > bw) (best = t), (bw = w);
         row.territory = c.territory.dict[best] || UNASSIGNED_LABEL;
-        row.territoryOthers = [...tm.keys()].filter((t) => t !== best).map((t) => c.territory.dict[t] || UNASSIGNED_LABEL).sort();
+        row.territoryOthers = [...tm.keys()]
+          .filter((t) => t !== best)
+          .map((t) => c.territory.dict[t] || UNASSIGNED_LABEL)
+          .sort();
       }
       if (level === 'customer') {
         const info = p.customerInfo.get(g);
@@ -692,6 +810,82 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     levels[level] = rowsOut;
   }
 
+  // Build Territory × Month matrix
+  const territoryAcc = levelAccs.find((la) => la.level === 'territory')!;
+  const territoryMonths: TerritoryMonthRow[] = [];
+  for (let t = 0; t < nTerr; t++) {
+    if (!territoryAcc.cnt[t]) continue;
+    const rawVal = c.territory.dict[t];
+    const tMonths: MonthPoint[] = period.chartMonths.map((m) => ({
+      month: m,
+      label: MONTH_ABBR[m - 1],
+      sums: sumsAt(terrMonthAcc, t * 13 + m),
+    }));
+    territoryMonths.push({
+      territory: rawVal,
+      label: rawVal || UNASSIGNED_LABEL,
+      sums: sumsAt(territoryAcc.acc, t),
+      months: tMonths,
+    });
+  }
+
+  // Build Item rows & Phase 4 insights
+  const itemRows: GroupRow[] = [];
+  for (let k = 0; k < nItem; k++) {
+    if (!itemCnt[k]) continue;
+    const name = c.item.dict[k];
+    const b = p.itemBrand[k];
+    itemRows.push({
+      id: `Item:${name}`,
+      field: 'Item',
+      value: name,
+      label: name || UNASSIGNED_LABEL,
+      sums: sumsAt(itemAcc, k),
+      rowCount: itemCnt[k],
+      brand: b >= 0 ? c.brand.dict[b] : undefined,
+    });
+  }
+
+  const distTotals = sumRows(levels.distributor);
+  const byLevel: Record<InsightLevel, ContributionRow[]> = {
+    subtype: levels.subtype.map((r) => toContributionRow(r, totals)),
+    distributor: levels.distributor.map((r) => toContributionRow(r, distTotals)),
+    territory: levels.territory.map((r) => toContributionRow(r, totals)),
+    brick: levels.brick.map((r) => toContributionRow(r, totals)),
+    item: itemRows.map((r) => toContributionRow(r, totals)),
+  };
+
+  const pvmSummary = decomposePriceVolume(
+    itemRows.map((r) => r.sums),
+    totals,
+  );
+
+  const levelPvmSummary: Record<InsightLevel, PriceVolumeSummary> = {
+    subtype: decomposePriceVolume(
+      levels.subtype.map((r) => r.sums),
+      totals,
+    ),
+    distributor: decomposePriceVolume(
+      levels.distributor.map((r) => r.sums),
+      distTotals,
+    ),
+    territory: decomposePriceVolume(
+      levels.territory.map((r) => r.sums),
+      totals,
+    ),
+    brick: decomposePriceVolume(
+      levels.brick.map((r) => r.sums),
+      totals,
+    ),
+    item: pvmSummary,
+  };
+
+  const insights: AnalysisInsights = {
+    pvmSummary,
+    levelPvmSummary,
+    byLevel,
+  };
+
   const lines: LineSummary[] = [];
   const linesTotal = emptySums();
   for (let l = 0; l < c.line.dict.length; l++) {
@@ -704,9 +898,23 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     linesTotal.cyV += s.cyV;
   }
 
-  const months: MonthPoint[] = period.chartMonths.map((m) => ({ month: m, label: MONTH_ABBR[m - 1], sums: sumsAt(monthAcc, m) }));
+  const months: MonthPoint[] = period.chartMonths.map((m) => ({
+    month: m,
+    label: MONTH_ABBR[m - 1],
+    sums: sumsAt(monthAcc, m),
+  }));
 
-  return { period, totals, months, levels, lines, linesTotal, matchedRows: matched };
+  return {
+    period,
+    totals,
+    months,
+    territoryMonths,
+    insights,
+    levels,
+    lines,
+    linesTotal,
+    matchedRows: matched,
+  };
 }
 
 /**
