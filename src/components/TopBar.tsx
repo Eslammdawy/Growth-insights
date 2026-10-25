@@ -22,6 +22,7 @@ export const TopBar: React.FC = () => {
     setPeriod,
     theme,
     toggleTheme,
+    analyzing,
   } = useDashboardStore();
 
   const years = meta?.availability.years ?? [2025, 2026];
@@ -198,6 +199,17 @@ export const TopBar: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Analyzing Progress Bar */}
+      {analyzing && (
+        <div
+          role="progressbar"
+          aria-label="Analyzing data"
+          className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden bg-sky-200/50 dark:bg-sky-950/50"
+        >
+          <div className="h-full w-full bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-500 animate-indeterminate" />
+        </div>
+      )}
     </header>
   );
 };

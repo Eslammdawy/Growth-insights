@@ -209,7 +209,7 @@ export const Filters: React.FC = () => {
             <Filter className="h-3.5 w-3.5 text-sky-500" />
             <span>Filters</span>
             {activeFilterCount > 0 && (
-              <span className="rounded-full bg-sky-500 px-1.5 py-0.2 text-[11px] font-bold text-white tabular-nums">
+              <span className="rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-bold text-white tabular-nums">
                 {activeFilterCount}
               </span>
             )}

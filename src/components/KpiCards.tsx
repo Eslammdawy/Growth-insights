@@ -60,9 +60,9 @@ export const KpiCards: React.FC = () => {
           <span
             className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
               isUp
-                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                ? 'bg-up/15 text-up dark:text-up-light'
                 : isDown
-                  ? 'bg-amber-600/15 text-amber-800 dark:text-amber-300'
+                  ? 'bg-down/15 text-down dark:text-down-light'
                   : 'bg-slate-500/15 text-slate-600 dark:text-slate-300'
             }`}
           >
@@ -81,9 +81,9 @@ export const KpiCards: React.FC = () => {
         <div
           className={`mt-1.5 flex items-baseline gap-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${
             isUp
-              ? 'text-emerald-600 dark:text-emerald-400'
+              ? 'text-up dark:text-up-light'
               : isDown
-                ? 'text-amber-600 dark:text-amber-400'
+                ? 'text-down dark:text-down-light'
                 : 'text-slate-900 dark:text-white'
           }`}
         >
@@ -106,9 +106,9 @@ export const KpiCards: React.FC = () => {
         <div
           className={`mt-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${
             isUp
-              ? 'text-emerald-600 dark:text-emerald-400'
+              ? 'text-up dark:text-up-light'
               : isDown
-                ? 'text-amber-600 dark:text-amber-400'
+                ? 'text-down dark:text-down-light'
                 : 'text-slate-900 dark:text-white'
           }`}
         >

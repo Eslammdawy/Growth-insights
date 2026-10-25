@@ -37,9 +37,9 @@ function GrowthBadge({ g }: { g: Growth }) {
     <span
       className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
         isUp
-          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+          ? 'bg-up/15 text-up dark:text-up-light'
           : isDown
-            ? 'bg-amber-600/15 text-amber-800 dark:text-amber-300'
+            ? 'bg-down/15 text-down dark:text-down-light'
             : 'bg-slate-500/10 text-slate-600 dark:text-slate-400'
       }`}
     >
@@ -110,7 +110,7 @@ export const Sidebar: React.FC = () => {
     <aside
       aria-label="Sales Lines navigation"
       className={`glass-panel flex shrink-0 flex-col border-r border-slate-200/70 dark:border-slate-800/80 transition-all duration-200 ${
-        sidebarCollapsed ? 'w-16' : 'w-68'
+        sidebarCollapsed ? 'w-16' : 'w-72'
       }`}
     >
       {/* Header */}
@@ -192,7 +192,7 @@ export const Sidebar: React.FC = () => {
                       <span className="truncate font-semibold">All Lines</span>
                       {fCount > 0 && (
                         <span
-                          className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                             active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
                           }`}
                         >
@@ -255,7 +255,7 @@ export const Sidebar: React.FC = () => {
                       </span>
                       {fCount > 0 && (
                         <span
-                          className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                             active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
                           }`}
                         >

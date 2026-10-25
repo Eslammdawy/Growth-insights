@@ -21,6 +21,7 @@ export const Dashboard: React.FC = () => {
     loadSampleData,
     theme,
     syncFromHash,
+    analyzing,
   } = useDashboardStore();
 
   // Sync theme class on <html>
@@ -123,7 +124,7 @@ export const Dashboard: React.FC = () => {
               </div>
 
               {/* Stacked Level Tables: SubType, Distributor, Territory, Brick, Customer */}
-              <div className="space-y-4 pt-1">
+              <div className={`space-y-4 pt-1 transition-opacity duration-200 ${analyzing ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
                 {LEVELS.map((lvl) => (
                   <LevelTable key={lvl} level={lvl} />
                 ))}

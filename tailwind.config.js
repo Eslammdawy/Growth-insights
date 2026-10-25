@@ -25,7 +25,28 @@ export default {
       boxShadow: {
         glass: '0 8px 32px rgba(15, 23, 42, 0.12)',
       },
+      keyframes: {
+        indeterminate: {
+          '0%': { transform: 'translateX(-100%)' },
+          '50%': { transform: 'translateX(30%) scaleX(0.7)' },
+          '100%': { transform: 'translateX(200%)' },
+        },
+      },
+      animation: {
+        indeterminate: 'indeterminate 1.4s ease-in-out infinite',
+      },
     },
   },
-  plugins: [],
+  plugins: [
+    ({ addBase, theme }) => {
+      addBase({
+        ':root': {
+          '--color-up': theme('colors.up.DEFAULT'),
+          '--color-up-light': theme('colors.up.light'),
+          '--color-down': theme('colors.down.DEFAULT'),
+          '--color-down-light': theme('colors.down.light'),
+        },
+      });
+    },
+  ],
 };

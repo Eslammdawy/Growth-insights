@@ -1,7 +1,7 @@
 # Worklog & Application Status (`worklog.md`)
 
 **Last Updated**: 2026-10-25
-**Application**: Sales Growth Analyzer (`app/`)
+**Application**: Sales Growth Analyzer
 **Status**: Healthy — All TypeScript checks (`tsc --noEmit`), Vitest acceptance tests (`10/10`), and production Vite build (`npm run build`) pass with zero errors.
 
 ---

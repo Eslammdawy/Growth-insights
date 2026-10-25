@@ -2,15 +2,8 @@
 
 Client-side analytical dashboard that measures quarterly sales growth versus the same quarter prior year (YoY) from the pre-converted columnar dataset (`public/data/sales.json.gz`).
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-## Architecture & Hybrid Data Loading
-=======
-##  Hybrid Data Loading
->>>>>>> 0173b1f (Describe what you changed)
-=======
 ## Architecture & Data Loading
->>>>>>> e81cd6e (Describe your changes)
+
 
 The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xlsx`) contains **494,242 rows** across 29 columns (~415 MB of uncompressed worksheet XML). To make loading and interactive slicing instantaneous:
 

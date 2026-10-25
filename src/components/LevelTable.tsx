@@ -285,7 +285,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     const chainsOpen = kind === 'row' && Boolean(r.children?.length) && expanded.has(r.id + CHAINS_SUFFIX);
     const isUp = d.status === 'growing' || d.status === 'new';
     const isDown = d.status === 'declining' || d.status === 'lost';
-    const tone = isUp ? 'text-emerald-600 dark:text-emerald-400' : isDown ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500';
+    const tone = isUp ? 'text-up dark:text-up-light' : isDown ? 'text-down dark:text-down-light' : 'text-slate-500';
     const barWidth = Math.min(100, Math.round((Math.abs(d.delta) / maxMag) * 100));
 
     return (
@@ -423,7 +423,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
             <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-800">
               <div
                 style={{ width: `${barWidth}%` }}
-                className={`h-full rounded-full ${isUp ? 'bg-emerald-500' : isDown ? 'bg-amber-500' : 'bg-slate-400'}`}
+                className={`h-full rounded-full ${isUp ? 'bg-up' : isDown ? 'bg-down' : 'bg-slate-400'}`}
               />
             </div>
           </div>

@@ -159,7 +159,7 @@ export const GrowthChart: React.FC = () => {
               {chartData.map((entry, idx) => (
                 <Cell
                   key={idx}
-                  fill={entry.val >= 0 ? '#059669' : '#d97706'}
+                  fill={entry.val >= 0 ? 'var(--color-up)' : 'var(--color-down)'}
                 />
               ))}
             </Bar>
