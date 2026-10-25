@@ -59,7 +59,14 @@ class DataWorkerClient {
   }
 
   loadUrl(url: string, onProgress?: (p: ParseProgress) => void): Promise<{ meta: DatasetMeta; sourceName: string }> {
-    return this.call({ type: 'load-url', url }, onProgress);
+    const base =
+      typeof document !== 'undefined' && document.baseURI
+        ? document.baseURI
+        : typeof window !== 'undefined'
+          ? window.location.href
+          : undefined;
+    const resolvedUrl = base ? new URL(url, base).href : url;
+    return this.call({ type: 'load-url', url: resolvedUrl }, onProgress);
   }
 
   loadFile(file: File, onProgress?: (p: ParseProgress) => void): Promise<{ meta: DatasetMeta; sourceName: string }> {

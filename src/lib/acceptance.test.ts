@@ -254,6 +254,12 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(b.totals.cyV).toBeCloseTo(a.totals.cyV, 4);
   });
 
+  it('11. decodeDataset rejects invalid format and non-object payloads', () => {
+    expect(() => decodeDataset(null)).toThrowError(DataError);
+    expect(() => decodeDataset('<!doctype html>')).toThrowError(DataError);
+    expect(() => decodeDataset({ format: 'wrong' })).toThrowError(DataError);
+  });
+
   it('10. Validation throws descriptive errors for missing columns and bad Date formats', () => {
     const missingDs = datasetFromRows([{ Date: 202607, Line: 'Rota 1' }]);
     expect(() => validateDataset(missingDs)).toThrowError(DataError);

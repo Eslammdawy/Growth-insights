@@ -41,9 +41,13 @@ async function decompressBytes(buf: ArrayBuffer, onProgress?: (p: ParseProgress)
   }
   if (typeof DecompressionStream !== 'undefined') {
     onProgress?.({ phase: 'sheet', ratio: 0.5, rows: 0 });
-    const ds = new DecompressionStream('gzip');
-    const stream = new Blob([bytes]).stream().pipeThrough(ds);
-    return await new Response(stream).text();
+    try {
+      const ds = new DecompressionStream('gzip');
+      const stream = new Blob([bytes]).stream().pipeThrough(ds);
+      return await new Response(stream).text();
+    } catch {
+      // Fall back to gunzipSync if DecompressionStream fails
+    }
   }
   onProgress?.({ phase: 'sheet', ratio: 0.5, rows: 0 });
   const unzipped = gunzipSync(bytes);
@@ -57,11 +61,17 @@ async function loadJsonGzFromBuffer(
   onProgress({ phase: 'directory', ratio: 0.15, rows: 0 });
   const text = await decompressBytes(buf, onProgress);
   onProgress({ phase: 'finalizing', ratio: 0.85, rows: 0 });
+  if (text.trim().startsWith('<')) {
+    throw new DataError(
+      'format',
+      'Received HTML document instead of JSON data. Check that the dataset URL is correct and exists on the server.',
+    );
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch {
-    throw new DataError('format', 'Invalid JSON in dataset file.');
+  } catch (err) {
+    throw new DataError('format', `Invalid JSON in dataset file: ${(err as Error).message || 'parse error'}.`);
   }
   const ds = decodeDataset(parsed);
   validateDataset(ds);
@@ -75,11 +85,26 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   try {
     if (msg.type === 'load-url') {
       send({ id: msg.id, type: 'progress', progress: { phase: 'directory', ratio: 0.05, rows: 0 } });
-      const resp = await fetch(msg.url);
+      let fetchUrl = msg.url;
+      if (!/^https?:\/\//i.test(fetchUrl) && typeof self !== 'undefined' && self.location) {
+        try {
+          fetchUrl = new URL(fetchUrl, self.location.origin).href;
+        } catch {
+          // ignore URL parsing error and use fetchUrl as-is
+        }
+      }
+      const resp = await fetch(fetchUrl);
       if (!resp.ok) {
         throw new DataError(
           'format',
           `Could not fetch sample data (${resp.status}). Run "npm run convert" first to generate public/data/sales.json.gz.`,
+        );
+      }
+      const contentType = resp.headers.get('content-type') || '';
+      if (contentType.includes('text/html')) {
+        throw new DataError(
+          'format',
+          `Could not load dataset from "${fetchUrl}": server returned an HTML page instead of dataset file.`,
         );
       }
       const buf = await resp.arrayBuffer();
