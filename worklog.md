@@ -2,42 +2,39 @@
 
 **Last Updated**: 2026-10-25
 **Application**: Sales Growth Analyzer
-**Status**: Healthy — All TypeScript checks (`tsc --noEmit`), Vitest acceptance tests (`10/10`), and production Vite build (`npm run build`) pass with zero errors.
+**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance tests (`12/12`), and production Vite build (`npm run build`) pass with zero errors.
 
 ---
 
-## 1. Summary of Recent Changes (2026-10-25 Update)
+## 1. Summary of Recent Improvements (2026-10-25)
 
-### 1.1 Removed All PPG Data & Focused on YoY Growth (`src/lib/metrics.ts`, `src/lib/format.ts`, `src/components/KpiCards.tsx`)
-- Removed `ppg` from the `Metric` union (`Metric = 'units' | 'value'`), removed `fmtPpg`, `ppg()`, and `ppgDecomposition()`.
-- Removed `Share of Total (CY)`, `Contrib. to Δ (pp)`, `CY Units Share`, and `Price Effect / Mix Effect` columns from the table model.
-- Kept only **PY**, **CY**, **YoY Growth ($\Delta = \text{CY} - \text{PY}$)**, and **YoY Growth %** ($(\text{CY} - \text{PY}) / |\text{PY}|$).
-- Updated `KpiCards.tsx` to display **Prior Period**, **Current Period**, **YoY Growth %**, and **YoY Growth ($\Delta$)** with both Units and Value sub-labels and no PPG references.
+### 1.1 Phase 1: Bug Fixes & Design Alignment
+- **Tailwind Class Corrections**: Replaced invalid `w-68` with `w-72` in `Sidebar.tsx`, and replaced invalid `py-0.2` with `py-0.5` in `Sidebar.tsx` and `Filters.tsx`.
+- **Merge Conflict Resolution**: Cleaned up leftover merge conflict markers in `README.md` and normalized documentation references.
+- **Color-Blind-Safe Growth Palette**: Made the Okabe-Ito `up` (`#0072B2`) and `down` (`#D55E00`) palette in `tailwind.config.js` the single source of truth. Exposed tokens as CSS custom properties (`--color-up`, `--color-down`) and wired them into UI badges, table progress bars, and Recharts fills.
+- **Visual Feedback on Analysis**: Exposed store's `analyzing` state via an indeterminate progress bar on `TopBar.tsx` and a dimmed transition overlay on the active table container during recalculation.
 
-### 1.2 Header Cleanup & Layout Shift (`src/components/TopBar.tsx`, `src/pages/Dashboard.tsx`)
-- Removed the **Upload**, **Load sample data**, **CSV Export**, and **Excel Export** buttons from `TopBar.tsx`, and removed obsolete `src/lib/export.ts`.
-- Kept the **Light / Dark mode toggle** on the right side of the sticky header.
-- Removed drag-and-drop upload overlays and large-file warning banners from `Dashboard.tsx`, and tightened vertical padding (`p-3 sm:p-4`, `space-y-3`) so the filters, KPI cards, charts, and level tables sit higher on the page.
+### 1.2 Phase 2: React Performance & State Architecture
+- **Zustand Selectors & Shallow Comparison**: Wrapped all 9 store subscriptions across components with granular selectors and `useShallow`. Isolates changes to search text, sidebar collapse state, and chart modes from triggering table re-renders.
+- **Memoized Table Rows**: Extracted `LevelTableRow` in `LevelTable.tsx` into a `React.memo` component with stable primitive props and memoized callbacks (`toggle`, `handleFilter`).
+- **Concurrent React 18 Primitives**: Implemented `useDeferredValue` for table filtering and `useTransition` for line, filter, and period updates.
+- **Code-Splitting & Lazy Loading**: Split `MonthChart` and `GrowthChart` via `React.lazy` and `Suspense` with skeleton loaders, decreasing main bundle size from 624 kB down to 258 kB.
+- **Error Boundaries**: Wrapped each chart and level table with `ErrorBoundary.tsx` to provide graceful retry cards on render exceptions.
+- **URL Hash Synchronization via `useSyncExternalStore`**: Built `src/lib/hashState.ts` providing bidirectional URL hash sync (`metric`, `line`, `year`, `q`, `m`, `lfl`, `brands`, `items`, `mainTypes`, `txTypes`, `drill`) validated against `DatasetMeta` on load.
+- **Worker Cancellation**: Added cancellation RPC in `workerClient.ts` and `data.worker.ts` so superseded analysis requests are aborted in-flight and skipped.
 
-### 1.3 Dedicated Table per Analysis Level with Inline Item Drill-Down (src/components/LevelTable.tsx, src/lib/aggregate.ts)
-- Rendered stacked LevelTable instances on the main page in order:
-  1. **SubType Level**
-  2. **Distributor Level**
-  3. **Territory Level**
-  4. **Customer Level**
-  *(Brick level table removed from the main stacked view and jump bar per user request; customer rows continue to display Brick CY and previous bricks in badges).*
-- Updated `analyze()` in `src/lib/aggregate.ts` to compute all 5 levels simultaneously in a single pass over the columnar dataset (`result.levels[level]`).
-- Added `analyzeItems(ds, query, target)` in `src/lib/aggregate.ts` (exposed via Web Worker message `type: 'items'`) to compute on-demand **Item** breakdowns for any expanded row.
-- On the **SubType Level** table, expandable SubTypes (`Chain`, `Private`) retain their inline **Chain** breakdown via a `N chains` toggle button, and both SubType rows and Chain child rows expand into their **Item** breakdown when clicked (`SubType → Chain → Item` or `SubType → Item`).
-- Each `LevelTable` has its own search box, growth status filter (`All`, `Growing`, `Declining`, `New`, `Lost`), Top/Bottom $N$ rank filter, collapse/expand toggle, virtualized row rendering (`@tanstack/react-virtual`), row-level cross-filter icon, and pinned **Totals** row.
-- Added a level selector dropdown to `GrowthChart.tsx` so the Top-10 horizontal bar chart can inspect any of the 5 levels.
+### 1.3 Phase 3: Accessibility & Responsive UI
+- **Accessible Table Row Expansion**: Replaced chevron icons with accessible `<button aria-expanded aria-controls aria-label>`, added `aria-sort` on sortable `<th>` headers, and set `aria-rowcount`/`aria-rowindex` on virtualized tables.
+- **Accessible Sidebar Navigation**: Removed misleading `role="tablist"`/`role="tab"` semantics; enabled arrow-key navigation that focuses buttons without firing premature calculations until confirmed.
+- **Off-Canvas Mobile Drawer**: Added responsive drawer behavior below `md` (< 768px) with backdrop overlay and a hamburger menu trigger in `TopBar.tsx`.
+- **280px Chart Height & Empty States**: Increased chart containers to `h-[280px]` and replaced `return null` with empty-state placeholder cards.
+- **Sticky In-Page Jump Bar**: Implemented `TableJumpBar.tsx` for one-click smooth scrolling between active stacked tables (`SubType`, `Distributor`, `Territory`, `Customer`).
+- **KPI Cards Sparkline**: Added a zero-dependency SVG monthly CY-vs-PY sparkline and removed the static `(CY − PY) / |PY|` caption.
 
-### 1.4 Unified Customer Identity & True CY Brick / Territory Attribution (`src/lib/aggregate.ts`)
-- Built a composite customer key (`CustomerID + CustomerName`) in `buildCustomerColumn()` so customers sharing the same ID and Name in PY and CY are always merged as **one customer** regardless of brick changes.
-- In `computeCustomers()`, each customer's most recent active sales month (CY first) determines their **updated true Brick** and **updated true Territory** (ignoring `Bonus` and `Return Bonus` rows).
-- Remapped the effective `Brick` and `Territory` columns (`effBrick`, `effTerr`) for every transaction row belonging to a customer to their CY Brick and CY Territory. As a result:
-  - A customer who moved from Brick A in PY to Brick B in CY appears as a single customer under Brick B on the **Customer Level** table (with Brick A shown in the `+1` tooltip badge).
-  - Both PY and CY sales of that customer are attributed to Brick B on the **Brick Level** table and to Brick B's territory on the **Territory Level** table.
+### 1.4 Brick Level Table Removal
+- Defined `TABLE_LEVELS = ['subtype', 'distributor', 'territory', 'customer']` in `src/lib/aggregate.ts`.
+- Removed the Brick table from the main dashboard stacked tables view and the jump bar per user request.
+- Preserved Brick computation in the worker and customer attributes so Brick CY and historical `+N` badges on the Customer table continue functioning seamlessly.
 
 ---
 
@@ -51,25 +48,28 @@
 | `src/lib/periods.ts` | Quarter/Month period resolution & like-for-like month matching | Clean |
 | `src/lib/metrics.ts` | `Units` & `Value` metric helpers, YoY Growth ($\Delta$) and YoY Growth % | Updated & Verified |
 | `src/lib/format.ts` | Number, currency (`EGP`), signed delta, and percentage formatters | Updated & Verified |
-| `src/lib/aggregate.ts` | Single-pass multi-level aggregator, CY Brick/Territory remapping, `analyzeItems` | Updated & Verified |
-| `src/lib/acceptance.test.ts` | 10 Vitest acceptance & invariant tests against `sample.json` and `edge-cases.json` | 10/10 Passing |
-| `src/workers/data.worker.ts` | Web Worker hosting dataset, `analyze`, and `analyzeItems` off the main thread | Updated & Verified |
-| `src/workers/workerClient.ts` | Promise RPC wrapper for `data.worker.ts` | Updated & Verified |
-| `src/store/useDashboardStore.ts` | Zustand store (filters, period, drill chips, cached `itemsByRow`, theme, URL hash) | Updated & Verified |
-| `src/components/TopBar.tsx` | Sticky header with period banner, Units/Value toggle, period controls, theme toggle | Updated & Verified |
-| `src/components/Sidebar.tsx` | Collapsible Sales Line navigation sorted by CY Value with YoY % badges | Clean |
-| `src/components/Filters.tsx` | Per-Line `Brand`/`Item` multi-selects + global `MainType` and `TransactionType` filters | Updated & Verified |
-| `src/components/DrillChips.tsx` | Active cross-filter chip bar | Updated & Verified |
-| `src/components/KpiCards.tsx` | 4 KPI summary cards (PY, CY, YoY Growth %, YoY Growth $\Delta$) | Updated & Verified |
-| `src/components/MonthChart.tsx` | Monthly PY vs CY bar chart with per-month YoY % badges | Updated & Verified |
-| `src/components/GrowthChart.tsx` | Top-10 horizontal YoY $\Delta$ / YoY % bar chart with level selector | Updated & Verified |
-| `src/components/LevelTable.tsx` | Virtualized level table with inline Item drill-down & SubType Chain breakdown | New & Verified |
-| `src/pages/Dashboard.tsx` | Main page layout assembling sidebar, header, filters, KPIs, charts, and 5 level tables | Updated & Verified |
+| `src/lib/aggregate.ts` | Single-pass multi-level aggregator, CY Brick/Territory remapping, `analyzeItems`, `TABLE_LEVELS` | Updated & Verified |
+| `src/lib/hashState.ts` | URL hash serialization, parsing, `DatasetMeta` validation, and `useSyncExternalStore` subscription | New & Verified |
+| `src/lib/acceptance.test.ts` | 12 Vitest acceptance, invariant, and URL hash round-trip tests | 12/12 Passing |
+| `src/workers/data.worker.ts` | Web Worker hosting dataset, `analyze`, `analyzeItems`, and request cancellation | Updated & Verified |
+| `src/workers/workerClient.ts` | Promise RPC wrapper for `data.worker.ts` with abort/cancellation tracking | Updated & Verified |
+| `src/store/useDashboardStore.ts` | Zustand store (selectors, filters, period, drill chips, cached `itemsByRow`, URL hash sync) | Updated & Verified |
+| `src/components/TopBar.tsx` | Header with period banner, Units/Value toggle, period controls, mobile menu button, progress bar | Updated & Verified |
+| `src/components/Sidebar.tsx` | Sales Line navigation with arrow key navigation, YoY % badges, off-canvas mobile drawer | Updated & Verified |
+| `src/components/Filters.tsx` | Per-Line `Brand`/`Item` multi-selects + global `MainType`/`TransactionType` filters with transitions | Updated & Verified |
+| `src/components/DrillChips.tsx` | Active cross-filter chip bar with transitions | Updated & Verified |
+| `src/components/KpiCards.tsx` | 4 KPI summary cards with live monthly CY-vs-PY mini sparklines | Updated & Verified |
+| `src/components/MonthChart.tsx` | Monthly PY vs CY bar chart (280px height, empty state, lazy-loaded) | Updated & Verified |
+| `src/components/GrowthChart.tsx` | Top-10 horizontal YoY bar chart (280px height, empty state, lazy-loaded) | Updated & Verified |
+| `src/components/TableJumpBar.tsx` | Sticky in-page navigation bar scrolling to each stacked level table | New & Verified |
+| `src/components/ErrorBoundary.tsx` | React error boundary component with retry support for charts and tables | New & Verified |
+| `src/components/LevelTable.tsx` | Virtualized level table with memoized rows, deferred search, accessible buttons, and ARIA attributes | Updated & Verified |
+| `src/pages/Dashboard.tsx` | Main page layout assembling sidebar drawer, header, filters, KPIs, charts, and stacked tables | Updated & Verified |
 
 ---
 
 ## 3. Verification Results
 
 - **TypeScript Check (`npm run typecheck`)**: Passed (`0` errors).
-- **Automated Tests (`npm run test`)**: Passed (`10/10` tests in `src/lib/acceptance.test.ts`, including multi-level totals, SubType chain children, per-row Item drill-down across all levels and chains, like-for-like period matching, growth edge cases, per-Line filter scoping, Bonus exclusion, and Customer CY Brick/Territory unification).
-- **Production Build (`npm run build`)**: Passed (`dist/index.html`, `dist/assets/data.worker-*.js`, `dist/assets/index-*.css`, `dist/assets/index-*.js` generated cleanly).
+- **Automated Tests (`npm run test`)**: Passed (`12/12` tests in `src/lib/acceptance.test.ts`, including multi-level totals, SubType chain children, per-row Item drill-down across all levels and chains, like-for-like period matching, growth edge cases, per-Line filter scoping, Bonus exclusion, Customer CY Brick/Territory unification, and URL hash serialization/validation).
+- **Production Build (`npm run build`)**: Passed cleanly with asynchronous chunks for charts (`MonthChart`, `GrowthChart`, `BarChart`) and an initial entry bundle of ~261 kB.
