@@ -2,7 +2,11 @@
 
 Client-side analytical dashboard that measures quarterly sales growth versus the same quarter prior year (YoY) from an Excel export or pre-converted columnar dataset.
 
+<<<<<<< HEAD
 ## Architecture & Hybrid Data Loading
+=======
+##  Hybrid Data Loading
+>>>>>>> 0173b1f (Describe what you changed)
 
 The real export (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xlsx`) contains **494,242 rows** across 29 columns (~415 MB of uncompressed worksheet XML). To make loading instantaneous while still supporting direct browser `.xlsx` uploads:
 
