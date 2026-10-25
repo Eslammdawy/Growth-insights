@@ -19,13 +19,13 @@
 - Kept the **Light / Dark mode toggle** on the right side of the sticky header.
 - Removed drag-and-drop upload overlays and large-file warning banners from `Dashboard.tsx`, and tightened vertical padding (`p-3 sm:p-4`, `space-y-3`) so the filters, KPI cards, charts, and level tables sit higher on the page.
 
-### 1.3 Dedicated Table per Analysis Level with Inline Item Drill-Down (`src/components/LevelTable.tsx`, `src/lib/aggregate.ts`)
-- Replaced single-table tab switching (`ComparisonTable.tsx` & `LevelTabs.tsx`, both removed) with five stacked `LevelTable` instances rendered on the main page in order:
+### 1.3 Dedicated Table per Analysis Level with Inline Item Drill-Down (src/components/LevelTable.tsx, src/lib/aggregate.ts)
+- Rendered stacked LevelTable instances on the main page in order:
   1. **SubType Level**
   2. **Distributor Level**
   3. **Territory Level**
-  4. **Brick Level**
-  5. **Customer Level**
+  4. **Customer Level**
+  *(Brick level table removed from the main stacked view and jump bar per user request; customer rows continue to display Brick CY and previous bricks in badges).*
 - Updated `analyze()` in `src/lib/aggregate.ts` to compute all 5 levels simultaneously in a single pass over the columnar dataset (`result.levels[level]`).
 - Added `analyzeItems(ds, query, target)` in `src/lib/aggregate.ts` (exposed via Web Worker message `type: 'items'`) to compute on-demand **Item** breakdowns for any expanded row.
 - On the **SubType Level** table, expandable SubTypes (`Chain`, `Private`) retain their inline **Chain** breakdown via a `N chains` toggle button, and both SubType rows and Chain child rows expand into their **Item** breakdown when clicked (`SubType → Chain → Item` or `SubType → Item`).
