@@ -6,6 +6,11 @@
  * Customer identity: rows with the same CustomerID AND CustomerName are one customer. Every row of a
  * customer is attributed to the customer's latest (CY) Brick and the Territory recorded with it, so a
  * customer that moved brick between PY and CY is compared like-for-like in its current brick.
+ *
+ * Item-to-Line reallocation: every row of an Item is attributed to the Line (and Brand) recorded in
+ * that item's latest period in the Current Year (e.g. Sep 202609 first, falling back to earlier CY months
+ * if the item had no Sep invoice). Items that are not allocated to any Line in CY are excluded globally
+ * from the report.
  */
 import {
   EXCLUDED_DISTRIBUTORS,
@@ -34,6 +39,7 @@ import {
   ResolvedPeriod,
   availabilityFromPeriods,
   resolvePeriod,
+  yearOf,
 } from './periods';
 
 export type Level = 'subtype' | 'territory' | 'brick' | 'customer' | 'distributor';
@@ -240,7 +246,9 @@ export interface Prepared {
   };
   availability: PeriodAvailability;
   customerInfo: Map<number, CustomerInfo>;
-  /** Brand of each item code (first seen). */
+  /** Effective CY Line of each item code (-1 = not allocated in CY / excluded from report). */
+  itemLine: Int32Array;
+  /** Effective CY Brand of each item code. */
   itemBrand: Int32Array;
 }
 
@@ -321,6 +329,38 @@ export function prepare(ds: Dataset): Prepared {
   const tx = new Uint8Array(n);
   for (let i = 0; i < n; i++) tx[i] = txOfCode[transactionType.codes[i]];
 
+  const availability = availabilityFromPeriods(periods);
+  const cyYear = availability.years[availability.years.length - 1] ?? -Infinity;
+  const rawLine = strCol(ds, 'Line');
+  const rawBrand = strCol(ds, 'Brand');
+  const item = strCol(ds, 'Item');
+
+  const { lineOfItem, brandOfItem } = computeItemAllocations(
+    n,
+    periods,
+    periodIdx,
+    tx,
+    cyYear,
+    item,
+    rawLine,
+    rawBrand,
+  );
+
+  // Effective Line & Brand columns (remapped to the item's latest CY structure);
+  // rows whose item has no CY Line allocation are excluded from the report (tx[i] = 0).
+  const effLine = new Int32Array(n);
+  const effBrand = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const it = item.codes[i];
+    const l = lineOfItem[it];
+    if (l > 0) {
+      effLine[i] = l;
+      effBrand[i] = brandOfItem[it] >= 0 ? brandOfItem[it] : rawBrand.codes[i];
+    } else {
+      tx[i] = 0;
+    }
+  }
+
   const customerId = strCol(ds, 'CustomerID');
   const customerName = strCol(ds, 'CustomerName');
   const rawBrick = strCol(ds, 'Brick');
@@ -355,14 +395,6 @@ export function prepare(ds: Dataset): Prepared {
     }
   }
 
-  const item = strCol(ds, 'Item');
-  const brand = strCol(ds, 'Brand');
-  const itemBrand = new Int32Array(item.dict.length).fill(-1);
-  for (let i = 0; i < n; i++) {
-    const it = item.codes[i];
-    if (itemBrand[it] < 0) itemBrand[it] = brand.codes[i];
-  }
-
   const p: Prepared = {
     ds,
     n,
@@ -372,8 +404,8 @@ export function prepare(ds: Dataset): Prepared {
     periodIdx,
     tx,
     c: {
-      line: strCol(ds, 'Line'),
-      brand,
+      line: { kind: 'str', name: 'Line', dict: rawLine.dict, codes: effLine },
+      brand: { kind: 'str', name: 'Brand', dict: rawBrand.dict, codes: effBrand },
       item,
       mainType: strCol(ds, 'MainType'),
       subType,
@@ -384,12 +416,74 @@ export function prepare(ds: Dataset): Prepared {
       distributor: strCol(ds, 'Distributor'),
       transactionType,
     },
-    availability: availabilityFromPeriods(periods),
+    availability,
     customerInfo: info,
-    itemBrand,
+    itemLine: lineOfItem,
+    itemBrand: brandOfItem,
   };
   preparedCache.set(ds, p);
   return p;
+}
+
+/**
+ * Item-to-Line & Brand allocation from each item's latest period in the Current Year
+ * (e.g. Sep 202609 first, falling back to earlier CY months such as 202608/202607 if the item had no Sep invoice).
+ * Ties within that period -> value with most rows, then first seen.
+ * Items that do not appear in any Line in CY get `lineOfItem[it] = -1` and are excluded from the report.
+ */
+function computeItemAllocations(
+  n: number,
+  date: number[],
+  periodIdx: Uint16Array,
+  tx: Uint8Array,
+  cyYear: number,
+  item: StrColumn,
+  line: StrColumn,
+  brand: StrColumn,
+): { lineOfItem: Int32Array; brandOfItem: Int32Array } {
+  const nItem = item.dict.length;
+  const latestCy = new Float64Array(nItem).fill(-Infinity);
+  for (let i = 0; i < n; i++) {
+    if (!tx[i]) continue;
+    const it = item.codes[i];
+    if (it === 0 || line.codes[i] === 0) continue;
+    const d = date[periodIdx[i]];
+    if (yearOf(d) === cyYear && d > latestCy[it]) {
+      latestCy[it] = d;
+    }
+  }
+  const lineCount = new Map<number, Map<number, number>>();
+  const brandCount = new Map<number, Map<number, number>>();
+  const bump = (m: Map<number, Map<number, number>>, it: number, k: number) => {
+    let mm = m.get(it);
+    if (!mm) m.set(it, (mm = new Map()));
+    mm.set(k, (mm.get(k) ?? 0) + 1);
+  };
+  for (let i = 0; i < n; i++) {
+    if (!tx[i]) continue;
+    const it = item.codes[i];
+    if (it === 0 || line.codes[i] === 0) continue;
+    if (date[periodIdx[i]] === latestCy[it]) {
+      bump(lineCount, it, line.codes[i]);
+      bump(brandCount, it, brand.codes[i]);
+    }
+  }
+  const pick = (m: Map<number, number> | undefined) => {
+    let best = -1;
+    let bestN = -1;
+    if (m) for (const [k, cnt] of m) if (cnt > bestN) (best = k), (bestN = cnt);
+    return best;
+  };
+  const lineOfItem = new Int32Array(nItem).fill(-1);
+  const brandOfItem = new Int32Array(nItem).fill(-1);
+  for (const [it, lm] of lineCount) {
+    const l = pick(lm);
+    if (l > 0) {
+      lineOfItem[it] = l;
+      brandOfItem[it] = Math.max(0, pick(brandCount.get(it)));
+    }
+  }
+  return { lineOfItem, brandOfItem };
 }
 
 /**
@@ -489,9 +583,10 @@ export function buildMeta(ds: Dataset): DatasetMeta {
   const mtUsed = new Uint8Array(mainType.dict.length);
   const txRows = new Int32Array(transactionType.dict.length);
   for (let i = 0; i < p.n; i++) {
+    const it = item.codes[i];
+    if (p.itemLine[it] <= 0) continue;
     const l = line.codes[i];
     const b = brand.codes[i];
-    const it = item.codes[i];
     lineUsed[l] = 1;
     mtUsed[mainType.codes[i]] = 1;
     txRows[transactionType.codes[i]]++;

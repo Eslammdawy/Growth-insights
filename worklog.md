@@ -2,7 +2,7 @@
 
 **Last Updated**: 2026-10-25
 **Application**: Sales Growth Analyzer
-**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance tests (`15/15`), and production Vite build (`npm run build`) pass with zero errors.
+**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance tests (`16/16`), and production Vite build (`npm run build`) pass with zero errors.
 
 ---
 
@@ -58,6 +58,14 @@
 - **Dashboard Integration (`src/pages/Dashboard.tsx` & `src/components/TableJumpBar.tsx`)**:
   - Added a collapsible **Visual Insights & Phase 4 Decomposition** section (`#section-insights`, expanded by default) with lazy-loaded components wrapped in `ErrorBoundary` and `Suspense`, and added an `Insights` jump button to `TableJumpBar.tsx`.
 
+### 1.7 Item-to-Line Reallocation & PY-Only Unallocated Item Removal
+- **Latest CY Period Item Attribution (`src/lib/aggregate.ts`)**:
+  - Added `computeItemAllocations` inside `prepare(ds)` so every row of an `Item` (across both PY and CY) is attributed to the `Line` and `Brand` recorded in that item's latest period in the Current Year (`202609` Sep 2026 first, falling back to `202608`/`202607` if the item had CY activity in Jul/Aug 2026 but no Sep invoice).
+  - For example, `Ampofer 100 mg 5 Amp` (which was in `Capital 1` in PY and moved to `Capital 3` in CY) now has all of its PY and CY rows attributed to `Capital 3`.
+- **Global Removal of Unallocated PY-Only Items (`src/lib/aggregate.ts`)**:
+  - Items that exist only in PY (`2025`) and have no allocation to any Line in CY (`2026`) receive `lineOfItem[it] = -1`, have their rows excluded (`tx[i] = 0`) from all aggregations (`All Lines`, per-Line badges, KPIs, monthly charts, level tables, and Phase 4 Price/Volume/Mix decomposition), and are omitted from `buildMeta(ds)` (`meta.products`, `brandOptions`, `itemOptions`).
+  - Ensures that the sum of the 9 Lines reconciles 100% with the `All Lines` total.
+
 ---
 
 ## 2. Codebase Inventory & Review Status
@@ -71,9 +79,9 @@
 | `src/lib/palette.ts` | Shared color-blind-safe palette tokens, heatmap CSS scale, and treemap fill helpers | New & Verified |
 | `src/lib/metrics.ts` | `Units` & `Value` metric helpers, YoY Growth, Contribution (pp), and Price/Volume/Mix decomposition | Updated & Verified |
 | `src/lib/format.ts` | Number, currency (`EGP`), unit price (`fmtPrice`), signed delta, percentage, and `pp` formatters | Updated & Verified |
-| `src/lib/aggregate.ts` | Single-pass multi-level aggregator, `territoryMonths` matrix, Phase 4 `insights`, `analyzeItems` | Updated & Verified |
+| `src/lib/aggregate.ts` | Single-pass multi-level aggregator, CY item-to-line reallocation, `territoryMonths` matrix, Phase 4 `insights`, `analyzeItems` | Updated & Verified |
 | `src/lib/hashState.ts` | URL hash serialization, parsing, `DatasetMeta` validation, and `useSyncExternalStore` subscription | Verified |
-| `src/lib/acceptance.test.ts` | 15 Vitest acceptance, invariant, Territory×Month, Contribution, and PVM decomposition tests | 15/15 Passing |
+| `src/lib/acceptance.test.ts` | 16 Vitest acceptance, invariant, Territory×Month, Contribution, PVM decomposition, and Item-to-Line reallocation tests | 16/16 Passing |
 | `src/workers/data.worker.ts` | Web Worker hosting dataset, `analyze`, `analyzeItems`, and request cancellation | Verified |
 | `src/workers/workerClient.ts` | Promise RPC wrapper for `data.worker.ts` with abort/cancellation tracking | Verified |
 | `src/store/useDashboardStore.ts` | Zustand store (selectors, filters, period, drill chips, cached `itemsByRow`, URL hash sync) | Verified |
@@ -98,5 +106,5 @@
 ## 3. Verification Results
 
 - **TypeScript Check (`npm run typecheck`)**: Passed (`0` errors).
-- **Automated Tests (`npm run test`)**: Passed (`15/15` tests in `src/lib/acceptance.test.ts`, including multi-level totals, SubType chain children, per-row Item drill-down, like-for-like period matching, growth edge cases, per-Line filter scoping, Bonus exclusion, Customer CY Brick/Territory unification, URL hash round-trip, Territory × Month matrix reconciliation, Phase 4 Contribution-to-Growth reconciliation, and Price/Volume/Mix additivity + edge cases).
+- **Automated Tests (`npm run test`)**: Passed (`16/16` tests in `src/lib/acceptance.test.ts`, including multi-level totals, SubType chain children, per-row Item drill-down, like-for-like period matching, growth edge cases, per-Line filter scoping, Bonus exclusion, Customer CY Brick/Territory unification, URL hash round-trip, Territory × Month matrix reconciliation, Phase 4 Contribution-to-Growth reconciliation, Price/Volume/Mix additivity + edge cases, and CY Item-to-Line reallocation + unallocated PY-only item removal).
 - **Production Build (`npm run build`)**: Passed cleanly with asynchronous code-split chunks for all visual components (`MonthChart`, `GrowthChart`, `BubbleScatterChart`, `TerritoryHeatmap`, `CyTreemap`, `ContributionPriceVolume`).

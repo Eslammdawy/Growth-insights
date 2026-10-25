@@ -87,8 +87,8 @@
   {
     "Date": 202507,
     "Line": "Capital 1",
-    "Brand": "Gamma",
-    "Item": "Gamma Syrup",
+    "Brand": "Beta",
+    "Item": "Beta 20mg",
     "MainType": "Hospital",
     "SubType": "Private Hospital",
     "Brick": "Alex 1",
@@ -100,6 +100,23 @@
     "TransactionType": "Sales",
     "Quantity": 80,
     "Value": 8000
+  },
+  {
+    "Date": 202507,
+    "Line": "Capital 2",
+    "Brand": "Gamma",
+    "Item": "Gamma Syrup",
+    "MainType": "Private",
+    "SubType": "Private",
+    "Brick": "Alex 2",
+    "Territory": "Alex",
+    "Chain": null,
+    "CustomerID": "C-999",
+    "CustomerName": "Discontinued Item Pharmacy",
+    "Distributor": "UCP",
+    "TransactionType": "Sales",
+    "Quantity": 500,
+    "Value": 25000
   },
   {
     "Date": 202507,

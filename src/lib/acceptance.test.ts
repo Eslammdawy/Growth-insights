@@ -463,4 +463,100 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(fmtSignedPrice(2.5, false)).toBe('+2.50');
     expect(fmtSignedPrice(-2.5, false)).toBe('−2.50');
   });
+
+  it('16. Item-to-Line reallocation uses latest CY period (Sep 202609 first) and removes unallocated PY-only items globally', () => {
+    const reallocDs = datasetFromRows([
+      // Item "Ampofer 100 mg 5 Amp": in Capital 1 in PY (202509), Capital 2 in 202607, and Capital 3 in 202609 (last period wins)
+      {
+        Date: 202509,
+        Line: 'Capital 1',
+        Brand: 'AMPOFER',
+        Item: 'Ampofer 100 mg 5 Amp',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-1',
+        CustomerName: 'Pharm 1',
+        Distributor: 'Ibn Sina',
+        TransactionType: 'Sales',
+        Quantity: 100,
+        Value: 10000,
+      },
+      {
+        Date: 202607,
+        Line: 'Capital 2',
+        Brand: 'AMPOFER',
+        Item: 'Ampofer 100 mg 5 Amp',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-1',
+        CustomerName: 'Pharm 1',
+        Distributor: 'Ibn Sina',
+        TransactionType: 'Sales',
+        Quantity: 40,
+        Value: 4000,
+      },
+      {
+        Date: 202609,
+        Line: 'Capital 3',
+        Brand: 'AMPOFER',
+        Item: 'Ampofer 100 mg 5 Amp',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-1',
+        CustomerName: 'Pharm 1',
+        Distributor: 'Ibn Sina',
+        TransactionType: 'Sales',
+        Quantity: 110,
+        Value: 11000,
+      },
+      // Item "PY Only Discontinued": present in PY (202509) only, not allocated to any Line in CY -> removed globally
+      {
+        Date: 202509,
+        Line: 'Capital 1',
+        Brand: 'OLD_BRAND',
+        Item: 'PY Only Discontinued',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Cairo 2',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-2',
+        CustomerName: 'Pharm 2',
+        Distributor: 'Ibn Sina',
+        TransactionType: 'Sales',
+        Quantity: 999,
+        Value: 99999,
+      },
+    ]);
+
+    const meta = buildMeta(reallocDs);
+    // Only Capital 3 exists in the effective structure; Capital 1, Capital 2, and PY Only Discontinued are excluded
+    expect(meta.lines).toEqual(['Capital 3']);
+    expect(brandOptions(meta, null)).toEqual(['AMPOFER']);
+    expect(itemOptions(meta, null, [])).toEqual(['Ampofer 100 mg 5 Amp']);
+    expect(itemOptions(meta, 'Capital 3', [])).toEqual(['Ampofer 100 mg 5 Amp']);
+
+    const q = baseQuery({
+      period: { cyYear: 2026, pyYear: 2025, quarter: 3, month: null, likeForLike: false },
+    });
+    const allRes = analyze(reallocDs, q);
+    // PY includes only Ampofer (100u, 10000V), NOT PY Only Discontinued (999u, 99999V)
+    expect(allRes.totals).toEqual({ pyQ: 100, pyV: 10000, cyQ: 150, cyV: 15000 });
+    expect(allRes.lines).toEqual([
+      { line: 'Capital 3', sums: { pyQ: 100, pyV: 10000, cyQ: 150, cyV: 15000 } },
+    ]);
+
+    // Filtering by Capital 3 includes the reallocated PY and earlier CY rows of Ampofer
+    const cap3Res = analyze(reallocDs, { ...q, line: 'Capital 3' });
+    expect(cap3Res.totals).toEqual({ pyQ: 100, pyV: 10000, cyQ: 150, cyV: 15000 });
+  });
 });
