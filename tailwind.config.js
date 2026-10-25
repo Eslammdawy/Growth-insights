@@ -18,12 +18,13 @@ export default {
         ],
       },
       colors: {
-        // Color-blind-safe growth palette (blue / orange, Okabe-Ito inspired)
-        up: { DEFAULT: '#0072B2', light: '#56B4E9' },
-        down: { DEFAULT: '#D55E00', light: '#E69F00' },
+        // Vibrant, high-contrast growth palette (Emerald / Rose)
+        up: { DEFAULT: '#059669', light: '#34D399', vivid: '#10B981' },
+        down: { DEFAULT: '#E11D48', light: '#FB7185', vivid: '#F43F5E' },
       },
       boxShadow: {
-        glass: '0 8px 32px rgba(15, 23, 42, 0.12)',
+        glass: '0 10px 36px -4px rgba(79, 70, 229, 0.10), 0 4px 16px -2px rgba(15, 23, 42, 0.06)',
+        'glass-lg': '0 20px 48px -8px rgba(79, 70, 229, 0.18), 0 8px 24px -4px rgba(15, 23, 42, 0.12)',
       },
       keyframes: {
         indeterminate: {

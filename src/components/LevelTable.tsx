@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
-import { DrillChip, GroupRow, ItemTarget, LEVEL_LABEL, Level } from '../lib/aggregate';
+import { DrillChip, GroupRow, ItemTarget, LEVEL_LABEL, Level, sumRows } from '../lib/aggregate';
 import { fmtGrowth, fmtMetric, fmtSigned } from '../lib/format';
 import { DerivedRow, Metric, deriveRow } from '../lib/metrics';
 import { StatusFilter, useDashboardStore } from '../store/useDashboardStore';
@@ -47,12 +47,53 @@ type FlatRow =
 
 const CHAINS_SUFFIX = '#chains';
 
+const LEVEL_THEME: Record<
+  Level,
+  {
+    topBar: string;
+    toolbarBg: string;
+    badge: string;
+    theadBg: string;
+  }
+> = {
+  subtype: {
+    topBar: 'from-indigo-500 via-violet-500 to-purple-500',
+    toolbarBg: 'from-indigo-50/80 via-violet-50/40 to-white/90 dark:from-indigo-950/50 dark:via-slate-900/90 dark:to-slate-900/90',
+    badge: 'from-indigo-600 to-violet-600',
+    theadBg: 'from-indigo-100/95 via-violet-50/95 to-indigo-50/95 dark:from-slate-900/95 dark:via-indigo-950/90 dark:to-slate-900/95',
+  },
+  distributor: {
+    topBar: 'from-cyan-500 via-sky-500 to-blue-600',
+    toolbarBg: 'from-cyan-50/80 via-sky-50/40 to-white/90 dark:from-cyan-950/50 dark:via-slate-900/90 dark:to-slate-900/90',
+    badge: 'from-cyan-600 to-blue-600',
+    theadBg: 'from-cyan-100/95 via-sky-50/95 to-cyan-50/95 dark:from-slate-900/95 dark:via-cyan-950/90 dark:to-slate-900/95',
+  },
+  territory: {
+    topBar: 'from-emerald-500 via-teal-500 to-cyan-500',
+    toolbarBg: 'from-emerald-50/80 via-teal-50/40 to-white/90 dark:from-emerald-950/50 dark:via-slate-900/90 dark:to-slate-900/90',
+    badge: 'from-emerald-600 to-teal-600',
+    theadBg: 'from-emerald-100/95 via-teal-50/95 to-emerald-50/95 dark:from-slate-900/95 dark:via-emerald-950/90 dark:to-slate-900/95',
+  },
+  brick: {
+    topBar: 'from-amber-500 via-orange-500 to-rose-500',
+    toolbarBg: 'from-amber-50/80 via-orange-50/40 to-white/90 dark:from-amber-950/50 dark:via-slate-900/90 dark:to-slate-900/90',
+    badge: 'from-amber-500 to-orange-600',
+    theadBg: 'from-amber-100/95 via-orange-50/95 to-amber-50/95 dark:from-slate-900/95 dark:via-amber-950/90 dark:to-slate-900/95',
+  },
+  customer: {
+    topBar: 'from-fuchsia-500 via-purple-500 to-indigo-500',
+    toolbarBg: 'from-fuchsia-50/80 via-purple-50/40 to-white/90 dark:from-fuchsia-950/50 dark:via-slate-900/90 dark:to-slate-900/90',
+    badge: 'from-fuchsia-600 to-purple-600',
+    theadBg: 'from-fuchsia-100/95 via-purple-50/95 to-indigo-50/95 dark:from-slate-900/95 dark:via-purple-950/90 dark:to-slate-900/95',
+  },
+};
+
 function OthersBadge({ others, fieldName }: { others?: string[]; fieldName: string }) {
   if (!others || others.length === 0) return null;
   return (
     <span
       title={`Prior / other ${fieldName} values: ${others.join(', ')}`}
-      className="ml-1.5 inline-flex cursor-help items-center rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 tabular-nums"
+      className="ml-1.5 inline-flex cursor-help items-center rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-500/30 dark:text-amber-300 tabular-nums"
     >
       +{others.length}
     </span>
@@ -138,7 +179,11 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
   const isItem = kind === 'item';
   const isUp = d.status === 'growing' || d.status === 'new';
   const isDown = d.status === 'declining' || d.status === 'lost';
-  const tone = isUp ? 'text-up dark:text-up-light' : isDown ? 'text-down dark:text-down-light' : 'text-slate-500';
+  const tone = isUp
+    ? 'text-emerald-600 dark:text-emerald-400'
+    : isDown
+      ? 'text-rose-600 dark:text-rose-400'
+      : 'text-slate-500';
   const barWidth = Math.min(100, Math.round((Math.abs(d.delta) / maxMag) * 100));
 
   return (
@@ -147,10 +192,12 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
       onClick={isItem ? undefined : () => onToggle(r.id, fr.target)}
       className={`group transition-colors ${isItem ? '' : 'cursor-pointer'} ${
         depth === 0
-          ? 'hover:bg-sky-500/10'
+          ? rowIndex % 2 === 0
+            ? 'bg-white/60 hover:bg-indigo-500/10 dark:bg-slate-900/35 dark:hover:bg-indigo-500/20'
+            : 'bg-indigo-50/40 hover:bg-indigo-500/10 dark:bg-indigo-950/20 dark:hover:bg-indigo-500/20'
           : isItem
-            ? 'bg-indigo-50/40 hover:bg-indigo-500/10 dark:bg-indigo-950/20'
-            : 'bg-slate-50/70 hover:bg-sky-500/10 dark:bg-slate-900/40'
+            ? 'bg-cyan-50/55 hover:bg-cyan-500/15 dark:bg-cyan-950/25 dark:hover:bg-cyan-500/20'
+            : 'bg-violet-50/60 hover:bg-violet-500/15 dark:bg-violet-950/30 dark:hover:bg-violet-500/20'
       }`}
     >
       {/* Label */}
@@ -158,11 +205,11 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
         <div className="flex items-center justify-between gap-2" style={{ paddingLeft: depth * 22 }}>
           <div
             className={`flex min-w-0 items-center gap-1.5 ${
-              depth === 0 ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-700 dark:text-slate-300'
+              depth === 0 ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-700 dark:text-slate-200'
             }`}
           >
             {isItem ? (
-              <Package className="h-3.5 w-3.5 shrink-0 text-indigo-400" />
+              <Package className="h-3.5 w-3.5 shrink-0 text-cyan-500 dark:text-cyan-400" />
             ) : (
               <button
                 type="button"
@@ -173,21 +220,21 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
                 aria-expanded={itemsOpen}
                 aria-controls={`items-${r.id}`}
                 aria-label={`${itemsOpen ? 'Hide' : 'Show'} items of ${r.label}`}
-                className="rounded-md p-0.5 text-slate-500 hover:text-sky-600 dark:text-slate-400 dark:hover:text-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                className="rounded-md p-0.5 text-indigo-500 hover:bg-indigo-500/15 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
-                {itemsOpen ? <ChevronDown className="h-4 w-4 text-sky-500" /> : <ChevronRight className="h-4 w-4" />}
+                {itemsOpen ? <ChevronDown className="h-4 w-4 text-indigo-600 dark:text-indigo-400" /> : <ChevronRight className="h-4 w-4" />}
               </button>
             )}
             <span className="truncate" dir="auto" title={r.label}>
               {r.label}
             </span>
             {isItem && r.brand && (
-              <span className="shrink-0 truncate text-[10px] text-slate-400 dark:text-slate-500" dir="auto">
+              <span className="shrink-0 truncate rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300" dir="auto">
                 {r.brand}
               </span>
             )}
             {kind === 'chain' && (
-              <span className="shrink-0 rounded bg-slate-200/70 px-1 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+              <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:bg-violet-500/25 dark:text-violet-300">
                 Chain
               </span>
             )}
@@ -201,10 +248,10 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
                 aria-expanded={chainsOpen}
                 aria-controls={`chains-${r.id}`}
                 title={`${chainsOpen ? 'Hide' : 'Show'} chain breakdown`}
-                className={`ml-1 inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                className={`ml-1 inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-all ${
                   chainsOpen
-                    ? 'bg-sky-600 text-white'
-                    : 'bg-slate-200/80 text-slate-600 hover:bg-sky-500/20 dark:bg-slate-800 dark:text-slate-300'
+                    ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
+                    : 'bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/30 hover:bg-violet-500/25 dark:bg-violet-500/20 dark:text-violet-300'
                 }`}
               >
                 <Network className="h-3 w-3" />
@@ -221,7 +268,7 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
               }}
               title="Filter the whole dashboard by this row"
               aria-label={`Filter dashboard by ${r.label}`}
-              className="rounded-md p-1 text-slate-400 opacity-0 transition-opacity hover:bg-sky-500/15 hover:text-sky-600 focus:opacity-100 group-hover:opacity-100 dark:hover:text-sky-300"
+              className="rounded-md p-1 text-indigo-400 opacity-0 transition-opacity hover:bg-indigo-500/15 hover:text-indigo-600 focus:opacity-100 group-hover:opacity-100 dark:hover:text-indigo-300"
             >
               <Filter className="h-3 w-3" />
             </button>
@@ -241,10 +288,7 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
       )}
       {level === 'customer' && (
         <>
-          <td className="px-3 py-1.5 font-mono text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-            {depth === 0 ? r.customerId : ''}
-          </td>
-          <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
+          <td className="px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300" dir="auto">
             {depth === 0 && (
               <div className="flex items-center truncate">
                 <span className="truncate">{r.brick}</span>
@@ -252,10 +296,10 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
               </div>
             )}
           </td>
-          <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
+          <td className="px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300" dir="auto">
             {depth === 0 && (
               <div className="flex items-center truncate">
-                <span className="truncate">{r.subType}</span>
+                <span className="truncate rounded-md bg-purple-500/10 px-1.5 py-0.5 text-[11px] font-medium text-purple-800 dark:bg-purple-500/20 dark:text-purple-200">{r.subType}</span>
                 <OthersBadge others={r.subTypeOthers} fieldName="SubType" />
               </div>
             )}
@@ -263,28 +307,42 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
         </>
       )}
 
-      <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtMetric(d.py, metric, false)}</td>
-      <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+      <td className="px-3 py-1.5 text-right font-medium tabular-nums text-slate-600 dark:text-slate-300">{fmtMetric(d.py, metric, false)}</td>
+      <td className="bg-indigo-500/[0.03] px-3 py-1.5 text-right font-bold tabular-nums text-indigo-950 dark:bg-cyan-500/[0.04] dark:text-cyan-100">
         {fmtMetric(d.cy, metric, false)}
       </td>
-      <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${tone}`}>{fmtSigned(d.delta, metric, false)}</td>
+      <td className={`px-3 py-1.5 text-right font-bold tabular-nums ${tone}`}>{fmtSigned(d.delta, metric, false)}</td>
       <td className="px-3 py-1.5">
         <div className="flex flex-col items-end gap-1">
           {d.growth.kind === 'new' ? (
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-bold text-sky-700 dark:text-sky-300">
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-700 ring-1 ring-amber-500/30 dark:bg-amber-500/25 dark:text-amber-300">
               <Sparkles className="h-3 w-3" />
               New
             </span>
           ) : (
-            <span className={`text-xs font-bold tabular-nums ${tone}`}>
+            <span
+              className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${
+                isUp
+                  ? 'bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30 dark:bg-emerald-500/20 dark:text-emerald-300'
+                  : isDown
+                    ? 'bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/30 dark:bg-rose-500/20 dark:text-rose-300'
+                    : 'bg-slate-500/10 text-slate-600 dark:text-slate-400'
+              }`}
+            >
               {isUp ? '▲' : isDown ? '▼' : ''}
               {fmtGrowth(d.growth)}
             </span>
           )}
-          <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-800">
+          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-800">
             <div
               style={{ width: `${barWidth}%` }}
-              className={`h-full rounded-full ${isUp ? 'bg-up' : isDown ? 'bg-down' : 'bg-slate-400'}`}
+              className={`h-full rounded-full ${
+                isUp
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                  : isDown
+                    ? 'bg-gradient-to-r from-rose-500 to-orange-500'
+                    : 'bg-slate-400'
+              }`}
             />
           </div>
         </div>
@@ -445,12 +503,17 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     overscan: 12,
   });
 
+  const tableTotals = useMemo(() => sumRows(rowList), [rowList]);
+
   if (!rows || !period || !totals) return null;
 
-  const extraCols = level === 'customer' ? 3 : level === 'brick' ? 1 : 0;
+  const extraCols = level === 'customer' ? 2 : level === 'brick' ? 1 : 0;
   const colCount = 5 + extraCols;
-  const total = deriveRow(totals, metric);
+  const total = deriveRow(tableTotals, metric);
   const label = LEVEL_LABEL[level];
+  const themeStyle = LEVEL_THEME[level];
+  const totalUp = total.status === 'growing' || total.status === 'new';
+  const totalDown = total.status === 'declining' || total.status === 'lost';
 
   const headerCell = (id: SortId, text: string, align: 'left' | 'right' = 'right') => {
     const isSorted = sort.id === id;
@@ -458,26 +521,26 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     return (
       <th
         aria-sort={sortState}
-        className={`border-b border-slate-200/80 dark:border-slate-800 px-3 py-2 font-bold uppercase tracking-wider text-[11px] text-slate-600 dark:text-slate-300 select-none ${
+        className={`border-b border-indigo-200/80 dark:border-slate-800 px-3 py-2.5 font-extrabold uppercase tracking-wider text-[11px] text-indigo-950 dark:text-indigo-200 select-none ${
           align === 'right' ? 'text-right' : 'text-left'
         }`}
       >
         <button
           type="button"
           onClick={() => setSort((s) => ({ id, desc: s.id === id ? !s.desc : id !== 'label' }))}
-          className={`inline-flex items-center gap-1 hover:text-sky-600 dark:hover:text-sky-400 focus:outline-none ${
+          className={`inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-cyan-400 focus:outline-none ${
             align === 'right' ? 'ml-auto' : ''
           }`}
         >
           {text}
           {sort.id === id ? (
             sort.desc ? (
-              <ArrowDown className="h-3.5 w-3.5 text-sky-500" />
+              <ArrowDown className="h-3.5 w-3.5 text-indigo-600 dark:text-cyan-400" />
             ) : (
-              <ArrowUp className="h-3.5 w-3.5 text-sky-500" />
+              <ArrowUp className="h-3.5 w-3.5 text-indigo-600 dark:text-cyan-400" />
             )
           ) : (
-            <ArrowUpDown className="h-3 w-3 opacity-35" />
+            <ArrowUpDown className="h-3 w-3 opacity-40" />
           )}
         </button>
       </th>
@@ -485,7 +548,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   };
 
   const plainHeader = (text: string) => (
-    <th className="border-b border-slate-200/80 dark:border-slate-800 px-3 py-2 text-left font-bold uppercase tracking-wider text-[11px] text-slate-600 dark:text-slate-300">
+    <th className="border-b border-indigo-200/80 dark:border-slate-800 px-3 py-2.5 text-left font-extrabold uppercase tracking-wider text-[11px] text-indigo-950 dark:text-indigo-200">
       {text}
     </th>
   );
@@ -499,22 +562,25 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     <section
       id={`table-${level}`}
       aria-label={`${label} level table`}
-      className="glass-panel flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 dark:border-slate-800/80 scroll-mt-28"
+      className="glass-panel relative flex flex-col overflow-hidden rounded-2xl border border-indigo-200/70 dark:border-slate-800/80 scroll-mt-28"
     >
+      <div className={`h-1.5 w-full bg-gradient-to-r ${themeStyle.topBar}`} />
       {/* Table toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 px-3.5 py-2 dark:border-slate-800/80">
-        <div className="flex items-center gap-2">
+      <div className={`flex flex-wrap items-center justify-between gap-2 border-b border-indigo-200/60 bg-gradient-to-r ${themeStyle.toolbarBg} px-3.5 py-2.5 dark:border-slate-800/80`}>
+        <div className="flex items-center gap-2.5">
           <button
             type="button"
             onClick={() => setCollapsed(!collapsed)}
             aria-expanded={!collapsed}
             title={collapsed ? 'Show table' : 'Hide table'}
-            className="rounded-lg p-1 text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-800"
+            className="rounded-lg p-1 text-indigo-600 hover:bg-indigo-500/15 dark:text-indigo-300 dark:hover:bg-slate-800"
           >
             {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
           </button>
-          <h2 className="text-sm font-bold text-slate-900 dark:text-white">{label} Level</h2>
-          <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
+          <span className={`inline-flex items-center rounded-lg bg-gradient-to-r ${themeStyle.badge} px-2.5 py-0.5 text-xs font-extrabold tracking-wide text-white shadow-sm`}>
+            {label} Level
+          </span>
+          <span className="text-xs font-medium text-slate-600 tabular-nums dark:text-slate-300">
             {topRows.length.toLocaleString('en-US')} of {rowList.length.toLocaleString('en-US')} · click a row to drill down by items
             {level === 'subtype' && ' · use “chains” for the chain breakdown'}
           </span>
@@ -523,14 +589,14 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
         {!collapsed && (
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-indigo-400" />
               <input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={level === 'customer' ? 'Search name, ID, brick…' : `Search ${label.toLowerCase()}…`}
+                placeholder={level === 'customer' ? 'Search customer, brick…' : `Search ${label.toLowerCase()}…`}
                 aria-label={`Search ${label}`}
-                className="w-48 rounded-xl border border-slate-200/80 bg-white/70 py-1 pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/60 dark:text-slate-100"
+                className="w-48 rounded-xl border border-indigo-200/80 bg-white/85 py-1 pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-100"
               />
               {search && (
                 <button
@@ -547,7 +613,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
               value={status}
               onChange={(e) => setStatus(e.target.value as StatusFilter)}
               aria-label={`${label} growth status filter`}
-              className="rounded-xl border border-slate-200/80 bg-white/70 px-2 py-1 text-xs font-medium text-slate-700 focus:border-sky-500 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/60 dark:text-slate-200"
+              className="rounded-xl border border-indigo-200/80 bg-white/85 px-2.5 py-1 text-xs font-semibold text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-200"
             >
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value} className="bg-white dark:bg-slate-900">
@@ -559,7 +625,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
               value={topN === null ? '' : String(topN)}
               onChange={(e) => setTopN(e.target.value === '' ? null : Number(e.target.value))}
               aria-label={`${label} top or bottom N`}
-              className="rounded-xl border border-slate-200/80 bg-white/70 px-2 py-1 text-xs font-medium text-slate-700 focus:border-sky-500 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/60 dark:text-slate-200"
+              className="rounded-xl border border-indigo-200/80 bg-white/85 px-2.5 py-1 text-xs font-semibold text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-200"
             >
               {TOP_N_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value} className="bg-white dark:bg-slate-900">
@@ -571,7 +637,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
               <button
                 type="button"
                 onClick={() => setExpanded(new Set())}
-                className="rounded-xl px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="rounded-xl bg-indigo-500/15 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-500/25 dark:text-indigo-300"
               >
                 Collapse all
               </button>
@@ -586,13 +652,12 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
             aria-rowcount={flat.length}
             className="w-full border-collapse text-left text-xs"
           >
-            <thead className="sticky top-0 z-20 bg-slate-100/95 shadow-sm backdrop-blur-md dark:bg-slate-900/95">
+            <thead className={`sticky top-0 z-20 bg-gradient-to-r ${themeStyle.theadBg} shadow-sm backdrop-blur-md`}>
               <tr>
                 {headerCell('label', level === 'customer' ? 'Customer' : label, 'left')}
                 {level === 'brick' && plainHeader('Territory')}
                 {level === 'customer' && (
                   <>
-                    {plainHeader('Customer ID')}
                     {plainHeader('Brick (CY)')}
                     {plainHeader('SubType')}
                   </>
@@ -603,7 +668,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                 {headerCell('growth', 'YoY Growth %')}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200/50 dark:divide-slate-800/60">
+            <tbody className="divide-y divide-indigo-100/70 dark:divide-slate-800/70">
               {flat.length === 0 && (
                 <tr>
                   <td colSpan={colCount} className="px-3 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
@@ -663,15 +728,34 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                 </tr>
               )}
             </tbody>
-            <tfoot className="sticky bottom-0 z-20 border-t-2 border-slate-300 bg-slate-100/95 font-bold text-slate-900 shadow-inner backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/95 dark:text-white">
+            <tfoot className="sticky bottom-0 z-20 border-t-2 border-indigo-400/50 bg-gradient-to-r from-indigo-950 via-violet-950 to-slate-900 font-bold text-white shadow-inner backdrop-blur-md">
               <tr>
-                <td className="px-3 py-2" colSpan={1 + extraCols}>
+                <td className="px-3 py-2.5 text-indigo-100" colSpan={1 + extraCols}>
                   Total ({rowList.length.toLocaleString('en-US')} {label.toLowerCase()}s)
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtMetric(total.py, metric, false)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtMetric(total.cy, metric, false)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtSigned(total.delta, metric, false)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtGrowth(total.growth)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-violet-200">{fmtMetric(total.py, metric, false)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-cyan-300">{fmtMetric(total.cy, metric, false)}</td>
+                <td
+                  className={`px-3 py-2.5 text-right tabular-nums ${
+                    totalUp ? 'text-emerald-400' : totalDown ? 'text-rose-400' : 'text-slate-200'
+                  }`}
+                >
+                  {fmtSigned(total.delta, metric, false)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-extrabold ${
+                      totalUp
+                        ? 'bg-emerald-500/25 text-emerald-300 ring-1 ring-emerald-400/40'
+                        : totalDown
+                          ? 'bg-rose-500/25 text-rose-300 ring-1 ring-rose-400/40'
+                          : 'bg-white/10 text-white'
+                    }`}
+                  >
+                    {totalUp ? '▲ ' : totalDown ? '▼ ' : ''}
+                    {fmtGrowth(total.growth)}
+                  </span>
+                </td>
               </tr>
             </tfoot>
           </table>

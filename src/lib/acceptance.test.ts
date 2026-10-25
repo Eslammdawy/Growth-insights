@@ -43,9 +43,10 @@ const baseQuery = (overrides: Partial<AnalysisQuery> = {}): AnalysisQuery => ({
 });
 
 describe('Acceptance tests (Sales Growth Analyzer)', () => {
-  it('1. Sum of rows at every level equals the grand total, for every metric (Units, Value)', () => {
+  it('1. Sum of rows at every non-excluded level equals the grand total, and Distributor excludes Ezaby', () => {
     const res = analyze(sampleDs, baseQuery());
-    for (const level of LEVELS) {
+    expect(res.levels.distributor.find((r) => r.value.toLowerCase() === 'ezaby')).toBeUndefined();
+    for (const level of LEVELS.filter((l) => l !== 'distributor')) {
       const rows = res.levels[level];
       expect(rows.length).toBeGreaterThan(0);
       const summed = sumRows(rows);
@@ -188,7 +189,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       sampleDs,
       baseQuery({ line: targetLine, brands: [chosenBrand] }),
     );
-    for (const lvl of LEVELS) {
+    for (const lvl of LEVELS.filter((l) => l !== 'distributor')) {
       const s = sumRows(r.levels[lvl]);
       expect(s.cyV).toBeCloseTo(r.totals.cyV, 5);
       expect(s.pyV).toBeCloseTo(r.totals.pyV, 5);

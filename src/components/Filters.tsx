@@ -12,7 +12,32 @@ interface MultiSelectProps {
   selected: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
+  accent?: 'indigo' | 'cyan' | 'purple';
 }
+
+const ACCENT_STYLES = {
+  indigo: {
+    activeBtn:
+      'border-indigo-500/70 bg-gradient-to-r from-indigo-500/15 to-violet-500/15 font-semibold text-indigo-900 shadow-sm dark:border-indigo-400/60 dark:from-indigo-500/25 dark:to-violet-500/25 dark:text-indigo-100',
+    badge: 'bg-indigo-500/15 text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200',
+    checkedRow: 'bg-gradient-to-r from-indigo-500/15 to-violet-500/15 font-semibold text-indigo-900 dark:text-indigo-100',
+    checkIcon: 'text-indigo-600 dark:text-indigo-400',
+  },
+  cyan: {
+    activeBtn:
+      'border-cyan-500/70 bg-gradient-to-r from-cyan-500/15 to-sky-500/15 font-semibold text-cyan-900 shadow-sm dark:border-cyan-400/60 dark:from-cyan-500/25 dark:to-sky-500/25 dark:text-cyan-100',
+    badge: 'bg-cyan-500/15 text-cyan-700 dark:bg-cyan-500/25 dark:text-cyan-200',
+    checkedRow: 'bg-gradient-to-r from-cyan-500/15 to-sky-500/15 font-semibold text-cyan-900 dark:text-cyan-100',
+    checkIcon: 'text-cyan-600 dark:text-cyan-400',
+  },
+  purple: {
+    activeBtn:
+      'border-purple-500/70 bg-gradient-to-r from-purple-500/15 to-fuchsia-500/15 font-semibold text-purple-900 shadow-sm dark:border-purple-400/60 dark:from-purple-500/25 dark:to-fuchsia-500/25 dark:text-purple-100',
+    badge: 'bg-purple-500/15 text-purple-700 dark:bg-purple-500/25 dark:text-purple-200',
+    checkedRow: 'bg-gradient-to-r from-purple-500/15 to-fuchsia-500/15 font-semibold text-purple-900 dark:text-purple-100',
+    checkIcon: 'text-purple-600 dark:text-purple-400',
+  },
+};
 
 const SearchableMultiSelect: React.FC<MultiSelectProps> = ({
   label,
@@ -21,10 +46,12 @@ const SearchableMultiSelect: React.FC<MultiSelectProps> = ({
   selected,
   onChange,
   placeholder = 'All',
+  accent = 'indigo',
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+  const tone = ACCENT_STYLES[accent];
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
@@ -48,19 +75,21 @@ const SearchableMultiSelect: React.FC<MultiSelectProps> = ({
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={`relative ${open ? 'z-50' : 'z-10'}`}>
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+        className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
           selected.length > 0
-            ? 'border-sky-500/60 bg-sky-500/10 font-semibold text-sky-800 dark:text-sky-200'
-            : 'border-slate-200/80 bg-white/70 text-slate-700 hover:bg-white dark:border-slate-700/80 dark:bg-slate-900/50 dark:text-slate-200'
+            ? tone.activeBtn
+            : open
+              ? 'border-indigo-400 bg-white text-slate-900 shadow-sm dark:border-indigo-500 dark:bg-slate-800 dark:text-white'
+              : 'border-indigo-200/80 bg-white/85 text-slate-700 hover:border-indigo-300 hover:bg-white dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:border-indigo-500/60'
         }`}
       >
-        <span className="text-slate-500 dark:text-slate-400">{label}:</span>
-        <span className="max-w-[160px] truncate">
+        <span className="font-medium text-slate-500 dark:text-slate-400">{label}:</span>
+        <span className="max-w-[160px] truncate font-semibold">
           {selected.length === 0
             ? placeholder
             : selected.length === 1
@@ -82,32 +111,35 @@ const SearchableMultiSelect: React.FC<MultiSelectProps> = ({
                 onChange([]);
               }
             }}
-            className="rounded-full p-0.5 hover:bg-sky-500/20"
+            className="rounded-full p-0.5 hover:bg-indigo-500/20"
           >
             <X className="h-3 w-3" />
           </span>
         )}
-        <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+        <ChevronDown className={`h-3.5 w-3.5 opacity-70 transition-transform duration-150 ${open ? 'rotate-180 text-indigo-600 dark:text-indigo-400' : ''}`} />
       </button>
 
       {open && (
-        <div className="glass-panel absolute left-0 top-full z-40 mt-1.5 w-72 rounded-2xl border border-slate-200/90 p-2.5 shadow-xl dark:border-slate-700/90">
+        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-indigo-200/90 bg-white/95 p-3 shadow-glass-lg ring-1 ring-indigo-500/15 backdrop-blur-2xl dark:border-indigo-500/40 dark:bg-slate-900/95">
           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-            <span>
-              {label} <span className="rounded bg-slate-500/10 px-1 py-0.5 text-[10px]">{scopeBadge}</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-200">
+              {label}{' '}
+              <span className={`ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${tone.badge}`}>
+                {scopeBadge}
+              </span>
             </span>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => onChange([...options])}
-                className="font-medium text-sky-600 hover:underline dark:text-sky-400"
+                className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
               >
                 Select all ({options.length})
               </button>
               <button
                 type="button"
                 onClick={() => onChange([])}
-                className="font-medium text-slate-500 hover:underline dark:text-slate-400"
+                className="font-medium text-rose-600 hover:underline dark:text-rose-400"
               >
                 Clear
               </button>
@@ -115,17 +147,17 @@ const SearchableMultiSelect: React.FC<MultiSelectProps> = ({
           </div>
 
           <div className="relative mb-2">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-indigo-400" />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={`Search ${label.toLowerCase()}...`}
-              className="w-full rounded-lg border border-slate-200 bg-white/80 py-1.5 pl-8 pr-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              className="w-full rounded-xl border border-indigo-200/80 bg-slate-50/90 py-1.5 pl-8 pr-2 text-xs text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800/90 dark:text-slate-100"
             />
           </div>
 
-          <div className="max-h-56 space-y-0.5 overflow-y-auto pr-1">
+          <div className="max-h-60 space-y-0.5 overflow-y-auto pr-1">
             {filtered.length === 0 ? (
               <div className="py-4 text-center text-xs text-slate-400">No matching options</div>
             ) : (
@@ -136,16 +168,16 @@ const SearchableMultiSelect: React.FC<MultiSelectProps> = ({
                     key={opt}
                     type="button"
                     onClick={() => toggleOption(opt)}
-                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
+                    className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
                       checked
-                        ? 'bg-sky-500/15 font-semibold text-sky-800 dark:text-sky-200'
-                        : 'text-slate-700 hover:bg-slate-200/50 dark:text-slate-200 dark:hover:bg-slate-800/60'
+                        ? tone.checkedRow
+                        : 'text-slate-700 hover:bg-indigo-50/80 dark:text-slate-200 dark:hover:bg-slate-800/80'
                     }`}
                   >
                     <span className="truncate pr-2" dir="auto">
                       {opt}
                     </span>
-                    {checked && <Check className="h-3.5 w-3.5 shrink-0 text-sky-500" />}
+                    {checked && <Check className={`h-3.5 w-3.5 shrink-0 ${tone.checkIcon}`} />}
                   </button>
                 );
               })
@@ -232,15 +264,17 @@ export const Filters: React.FC = () => {
   return (
     <section
       aria-label="Filters"
-      className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 px-3.5 py-2.5"
+      className="glass-panel relative z-30 rounded-2xl border border-indigo-200/70 bg-gradient-to-r from-white/90 via-indigo-50/40 to-cyan-50/40 px-3.5 py-2.5 dark:border-indigo-500/25 dark:from-slate-900/90 dark:via-indigo-950/40 dark:to-slate-900/90"
     >
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 pr-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
-            <Filter className="h-3.5 w-3.5 text-sky-500" />
+          <div className="flex items-center gap-1.5 pr-1 text-xs font-bold text-indigo-900 dark:text-indigo-200">
+            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm">
+              <Filter className="h-3.5 w-3.5" />
+            </span>
             <span>Filters</span>
             {activeFilterCount > 0 && (
-              <span className="rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-bold text-white tabular-nums">
+              <span className="rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-sm tabular-nums">
                 {activeFilterCount}
               </span>
             )}
@@ -253,6 +287,7 @@ export const Filters: React.FC = () => {
             options={availableBrands}
             selected={currentLineFilter.brands}
             onChange={handleBrandsChange}
+            accent="indigo"
           />
 
           <SearchableMultiSelect
@@ -261,9 +296,10 @@ export const Filters: React.FC = () => {
             options={availableItems}
             selected={currentLineFilter.items}
             onChange={handleItemsChange}
+            accent="cyan"
           />
 
-          <span className="mx-0.5 hidden h-4 w-px bg-slate-300 dark:bg-slate-700 sm:inline-block" />
+          <span className="mx-0.5 hidden h-4 w-px bg-indigo-200 dark:bg-slate-700 sm:inline-block" />
 
           {/* Global MainType Filter */}
           <SearchableMultiSelect
@@ -272,15 +308,16 @@ export const Filters: React.FC = () => {
             options={meta?.mainTypes ?? []}
             selected={mainTypes}
             onChange={handleMainTypesChange}
+            accent="purple"
           />
 
           {/* Global Transaction Types Pills */}
           <div
             role="group"
             aria-label="Transaction types"
-            className="flex items-center gap-1 rounded-xl border border-slate-200/80 bg-white/70 px-2 py-1 text-xs dark:border-slate-700/80 dark:bg-slate-900/50"
+            className="flex items-center gap-1 rounded-xl border border-indigo-200/80 bg-white/85 px-2 py-1 text-xs dark:border-slate-700/80 dark:bg-slate-900/70"
           >
-            <span className="text-slate-500 dark:text-slate-400">Tx:</span>
+            <span className="font-medium text-slate-500 dark:text-slate-400">Tx:</span>
             {TX_TYPES.map((t) => {
               const checked = txTypes.includes(t);
               return (
@@ -289,10 +326,10 @@ export const Filters: React.FC = () => {
                   type="button"
                   onClick={() => toggleTxType(t)}
                   aria-pressed={checked}
-                  className={`rounded-lg px-2 py-0.5 text-xs font-medium transition-colors ${
+                  className={`rounded-lg px-2.5 py-0.5 text-xs font-semibold transition-all ${
                     checked
-                      ? 'bg-sky-600 text-white'
-                      : 'text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-800'
+                      ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:bg-indigo-50 dark:text-slate-400 dark:hover:bg-slate-800'
                   }`}
                 >
                   {t}
@@ -300,7 +337,7 @@ export const Filters: React.FC = () => {
               );
             })}
             <span
-              className="ml-0.5 cursor-help text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              className="ml-0.5 cursor-help text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300"
               title="Returns are negative and are netted against sales. Bonus / Return Bonus are excluded from all metrics."
               aria-label="Returns are negative and are netted against sales. Bonus and Return Bonus are excluded."
             >
@@ -314,7 +351,7 @@ export const Filters: React.FC = () => {
           {currentLineFilter.brands.slice(0, 3).map((b) => (
             <span
               key={`b-${b}`}
-              className="inline-flex items-center gap-1 rounded-lg bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:text-sky-200"
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-800 dark:text-indigo-200"
             >
               Brand: {b}
               <button
@@ -325,6 +362,7 @@ export const Filters: React.FC = () => {
                   )
                 }
                 aria-label={`Remove brand ${b}`}
+                className="rounded-full p-0.5 hover:bg-indigo-500/20"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -333,7 +371,7 @@ export const Filters: React.FC = () => {
           {currentLineFilter.items.slice(0, 2).map((it) => (
             <span
               key={`i-${it}`}
-              className="inline-flex items-center gap-1 rounded-lg bg-indigo-500/15 px-2 py-0.5 text-[11px] font-medium text-indigo-800 dark:text-indigo-200"
+              className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/15 px-2 py-0.5 text-[11px] font-semibold text-cyan-900 dark:text-cyan-200"
             >
               Item: <span className="max-w-[120px] truncate">{it}</span>
               <button
@@ -344,6 +382,7 @@ export const Filters: React.FC = () => {
                   )
                 }
                 aria-label={`Remove item ${it}`}
+                className="rounded-full p-0.5 hover:bg-cyan-500/20"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -354,7 +393,7 @@ export const Filters: React.FC = () => {
             <button
               type="button"
               onClick={handleResetFilters}
-              className="inline-flex items-center gap-1 rounded-xl border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-500/20 dark:text-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-500"
+              className="inline-flex items-center gap-1 rounded-xl border border-rose-500/40 bg-gradient-to-r from-rose-500/15 to-pink-500/15 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:from-rose-500/25 hover:to-pink-500/25 dark:text-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-500"
             >
               <RotateCcw className="h-3 w-3" />
               Reset filters

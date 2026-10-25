@@ -7,7 +7,13 @@
  * customer is attributed to the customer's latest (CY) Brick and the Territory recorded with it, so a
  * customer that moved brick between PY and CY is compared like-for-like in its current brick.
  */
-import { EXPANDABLE_SUBTYPES, TxType, UNASSIGNED_CHAIN_LABEL, UNASSIGNED_LABEL } from './config';
+import {
+  EXCLUDED_DISTRIBUTORS,
+  EXPANDABLE_SUBTYPES,
+  TxType,
+  UNASSIGNED_CHAIN_LABEL,
+  UNASSIGNED_LABEL,
+} from './config';
 import { Dataset, StrColumn, numCol, strCol } from './columnar';
 import { Sums, emptySums } from './metrics';
 import {
@@ -629,6 +635,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     tm.set(t, (tm.get(t) ?? 0) + Math.abs(v) + 1e-6);
   }
 
+  const excludedDistributors = new Set(EXCLUDED_DISTRIBUTORS.map((d) => d.trim().toLowerCase()));
   const levels = {} as Record<Level, GroupRow[]>;
   for (const { level, col, acc, cnt } of levelAccs) {
     const field = LEVEL_FIELD[level];
@@ -636,6 +643,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     for (let g = 0; g < col.dict.length; g++) {
       if (!cnt[g]) continue;
       const value = col.dict[g];
+      if (level === 'distributor' && excludedDistributors.has(value.trim().toLowerCase())) continue;
       const row: GroupRow = {
         id: `${field}:${value}`,
         field,

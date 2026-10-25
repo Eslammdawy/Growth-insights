@@ -36,6 +36,11 @@
 - Removed the Brick table from the main dashboard stacked tables view and the jump bar per user request.
 - Preserved Brick computation in the worker and customer attributes so Brick CY and historical `+N` badges on the Customer table continue functioning seamlessly.
 
+### 1.5 Table & KPI Card Refinements
+- **Distributor Level Exclusion**: Added `EXCLUDED_DISTRIBUTORS = ['Ezaby', 'Ezzaby']` in `src/lib/config.ts` and filtered `Ezaby` out of `levels.distributor` in `src/lib/aggregate.ts` (since its figures are already illustrated in the SubType level table), while computing each table's footer total directly from its displayed rows (`sumRows(rowList)`).
+- **Customer Level Column Cleanup**: Removed the `Customer ID` column from the Customer level table in `src/components/LevelTable.tsx` to give more horizontal space to Customer Name, Brick (CY), SubType, and metric columns.
+- **3-Column KPI Cards Layout**: Removed the standalone Prior Period KPI card in `src/components/KpiCards.tsx`, displayed the Prior Period figure in the metadata line under the Current Period figure, and aligned the 3 KPI cards side-by-side (`sm:grid-cols-3`).
+
 ---
 
 ## 2. Codebase Inventory & Review Status

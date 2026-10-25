@@ -29,7 +29,7 @@ The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xls
   - $\text{CY} = 0 \text{ and } \text{PY} > 0 \rightarrow -100.0\% \text{ (Lost)}$
   - $\text{PY} = 0 \text{ and } \text{CY} = 0 \rightarrow \text{–}$
 - **KPI Cards**:
-  - Displays Prior Period, Current Period, YoY Growth %, and YoY Growth ($\Delta$).
+  - Displays 3 aligned KPI cards: Current Period (with Prior Period figure shown in the metadata below), YoY Growth %, and YoY Growth ($\Delta$).
   - Displays a live monthly CY-vs-PY mini sparkline under YoY Growth % comparing trends across the quarter.
 - **Table Value Columns**:
   - `PY`, `CY`, `YoY Growth` ($\Delta$), and `YoY Growth %` (with inline magnitude bars and status badges).
@@ -41,9 +41,9 @@ Dedicated stacked tables are rendered on the main dashboard page (`src/component
 1. **SubType Level**:
    - Click any `SubType` row to expand its **Item** breakdown inline.
    - For expandable SubTypes (`Chain` and `Private`), click the **`N chains`** pill to expand the per-`Chain` breakdown inline; click any `Chain` child row to expand that chain's **Item** breakdown (3-level hierarchy: `SubType → Chain → Item`).
-2. **Distributor Level**: Click any distributor row to expand its **Item** breakdown.
+2. **Distributor Level**: Excludes `Ezaby` (which is already represented under the `SubType` level table); click any distributor row to expand its **Item** breakdown.
 3. **Territory Level**: Click any territory row to expand its **Item** breakdown.
-4. **Customer Level**: Shows `Customer Name`, `Customer ID`, `Brick (CY)`, and `SubType` (`+N` badges for historical values); click any customer row to expand its **Item** breakdown.
+4. **Customer Level**: Shows `Customer Name`, `Brick (CY)`, and `SubType` (`+N` badges for historical values); click any customer row to expand its **Item** breakdown.
 
 Each level table includes:
 - **Keyboard accessibility**: real `<button aria-expanded aria-controls>` chevron toggle, `aria-sort` on sortable headers, and `aria-rowcount`/`aria-rowindex`.

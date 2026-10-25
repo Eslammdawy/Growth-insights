@@ -4,18 +4,18 @@
 
 @layer base {
   body {
-    @apply antialiased selection:bg-sky-500 selection:text-white;
+    @apply antialiased selection:bg-indigo-600 selection:text-white;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 }
 
 @layer components {
   .glass-panel {
-    @apply bg-white/75 dark:bg-slate-900/75 backdrop-blur-xl shadow-glass;
+    @apply bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl shadow-glass;
   }
 }
 
-/* Custom subtle scrollbars */
+/* Custom vibrant scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -24,9 +24,9 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
+  background: rgba(99, 102, 241, 0.35);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.55);
+  background: rgba(99, 102, 241, 0.6);
 }

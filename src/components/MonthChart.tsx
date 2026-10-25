@@ -57,23 +57,24 @@ export const MonthChart: React.FC = () => {
   const axisColor = isDark ? '#94a3b8' : '#64748b';
 
   return (
-    <div className="glass-panel flex flex-col rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3">
-      <div className="mb-2 flex items-center justify-between">
+    <div className="glass-panel relative flex flex-col overflow-hidden rounded-2xl border border-indigo-200/70 p-3.5 dark:border-slate-800/80">
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-violet-500 via-indigo-500 to-cyan-500" />
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+          <h2 className="text-xs font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200">
             Monthly Trend ({METRIC_LABEL[metric]})
           </h2>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">
+          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
             {period.pyYear} vs {period.cyYear} by month
           </p>
         </div>
-        <div className="flex gap-2 text-[11px] tabular-nums">
+        <div className="flex flex-wrap gap-1.5 text-[11px] tabular-nums">
           {data.map((d) => (
             <span
               key={d.month}
-              className="rounded-lg bg-slate-200/60 dark:bg-slate-800/80 px-2 py-0.5 font-medium text-slate-700 dark:text-slate-300"
+              className="rounded-lg border border-indigo-200/70 bg-indigo-50/70 px-2 py-0.5 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
             >
-              {d.month}: <strong className="text-sky-600 dark:text-sky-400">{d.growthText}</strong>
+              {d.month}: <strong className="text-indigo-600 dark:text-cyan-400">{d.growthText}</strong>
             </span>
           ))}
         </div>
@@ -82,10 +83,20 @@ export const MonthChart: React.FC = () => {
       <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 6, right: 12, left: 4, bottom: 0 }}>
+            <defs>
+              <linearGradient id="monthPyGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.95} />
+                <stop offset="100%" stopColor="#6366f1" stopOpacity={0.75} />
+              </linearGradient>
+              <linearGradient id="monthCyGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.95} />
+                <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.85} />
+              </linearGradient>
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
             <XAxis
               dataKey="month"
-              tick={{ fill: axisColor, fontSize: 11 }}
+              tick={{ fill: axisColor, fontSize: 11, fontWeight: 600 }}
               axisLine={{ stroke: gridColor }}
               tickLine={false}
             />
@@ -99,7 +110,7 @@ export const MonthChart: React.FC = () => {
             <Tooltip
               contentStyle={{
                 backgroundColor: isDark ? '#0f172a' : '#ffffff',
-                borderColor: isDark ? '#334155' : '#e2e8f0',
+                borderColor: isDark ? '#4f46e5' : '#c7d2fe',
                 borderRadius: '0.75rem',
                 fontSize: '12px',
               }}
@@ -109,11 +120,11 @@ export const MonthChart: React.FC = () => {
               ]}
             />
             <Legend
-              wrapperStyle={{ fontSize: '11px' }}
+              wrapperStyle={{ fontSize: '11px', fontWeight: 600 }}
               formatter={(v) => (v === 'PY' ? `PY (${period.pyYear})` : `CY (${period.cyYear})`)}
             />
-            <Bar dataKey="PY" fill="#94a3b8" radius={[6, 6, 0, 0]} maxBarSize={32} />
-            <Bar dataKey="CY" fill="#0284c7" radius={[6, 6, 0, 0]} maxBarSize={32} />
+            <Bar dataKey="PY" fill="url(#monthPyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34} />
+            <Bar dataKey="CY" fill="url(#monthCyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34} />
           </BarChart>
         </ResponsiveContainer>
       </div>

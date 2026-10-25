@@ -79,15 +79,16 @@ export const GrowthChart: React.FC = () => {
   const axisColor = isDark ? '#cbd5e1' : '#334155';
 
   return (
-    <div className="glass-panel flex flex-col rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3">
+    <div className="glass-panel relative flex flex-col overflow-hidden rounded-2xl border border-indigo-200/70 p-3.5 dark:border-slate-800/80">
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-500 to-rose-500" />
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+            <h2 className="text-xs font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200">
               Top {chartData.length} by{' '}
               {chartMode === 'delta' ? `${METRIC_LABEL[metric]} YoY Δ` : `${METRIC_LABEL[metric]} YoY Growth %`}
             </h2>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
               {LEVEL_LABEL[chartLevel]} level ranked by {chartMode === 'delta' ? 'YoY Δ' : 'YoY Growth %'}
             </p>
           </div>
@@ -97,7 +98,7 @@ export const GrowthChart: React.FC = () => {
             value={chartLevel}
             onChange={(e) => setChartLevel(e.target.value as Level)}
             aria-label="Chart level selection"
-            className="rounded-lg border border-slate-200/80 bg-white/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:border-slate-700/80 dark:bg-slate-900/60 dark:text-slate-200 focus:outline-none"
+            className="rounded-lg border border-indigo-200/80 bg-white/85 px-2.5 py-0.5 text-xs font-bold text-indigo-900 dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-indigo-200 focus:outline-none"
           >
             {LEVELS.map((lvl) => (
               <option key={lvl} value={lvl} className="bg-white dark:bg-slate-900">
@@ -110,15 +111,15 @@ export const GrowthChart: React.FC = () => {
         <div
           role="group"
           aria-label="Chart mode"
-          className="inline-flex rounded-xl bg-slate-200/80 dark:bg-slate-800/90 p-0.5 text-xs"
+          className="inline-flex rounded-xl border border-indigo-200/70 bg-indigo-50/80 p-0.5 text-xs dark:border-slate-700/80 dark:bg-slate-800/90"
         >
           <button
             type="button"
             onClick={() => setChartMode('delta')}
             aria-pressed={chartMode === 'delta'}
-            className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
+            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
               chartMode === 'delta'
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-sky-600 dark:text-white'
+                ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-300'
             }`}
           >
@@ -128,9 +129,9 @@ export const GrowthChart: React.FC = () => {
             type="button"
             onClick={() => setChartMode('growth')}
             aria-pressed={chartMode === 'growth'}
-            className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
+            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
               chartMode === 'growth'
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-sky-600 dark:text-white'
+                ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-300'
             }`}
           >
@@ -146,6 +147,16 @@ export const GrowthChart: React.FC = () => {
             layout="vertical"
             margin={{ top: 2, right: 20, left: 8, bottom: 0 }}
           >
+            <defs>
+              <linearGradient id="growthUpGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#10b981" stopOpacity={0.9} />
+                <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.95} />
+              </linearGradient>
+              <linearGradient id="growthDownGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.95} />
+                <stop offset="100%" stopColor="#fb923c" stopOpacity={0.9} />
+              </linearGradient>
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} horizontal={false} />
             <XAxis
               type="number"
@@ -158,7 +169,7 @@ export const GrowthChart: React.FC = () => {
               type="category"
               dataKey="name"
               width={135}
-              tick={{ fill: axisColor, fontSize: 11 }}
+              tick={{ fill: axisColor, fontSize: 11, fontWeight: 500 }}
               axisLine={false}
               tickLine={false}
             />
@@ -166,7 +177,7 @@ export const GrowthChart: React.FC = () => {
             <Tooltip
               contentStyle={{
                 backgroundColor: isDark ? '#0f172a' : '#ffffff',
-                borderColor: isDark ? '#334155' : '#e2e8f0',
+                borderColor: isDark ? '#4f46e5' : '#c7d2fe',
                 borderRadius: '0.75rem',
                 fontSize: '12px',
               }}
@@ -179,11 +190,11 @@ export const GrowthChart: React.FC = () => {
                 ];
               }}
             />
-            <Bar dataKey="val" radius={[0, 5, 5, 0]} maxBarSize={16}>
+            <Bar dataKey="val" radius={[0, 6, 6, 0]} maxBarSize={16}>
               {chartData.map((entry, idx) => (
                 <Cell
                   key={idx}
-                  fill={entry.val >= 0 ? 'var(--color-up)' : 'var(--color-down)'}
+                  fill={entry.val >= 0 ? 'url(#growthUpGrad)' : 'url(#growthDownGrad)'}
                 />
               ))}
             </Bar>

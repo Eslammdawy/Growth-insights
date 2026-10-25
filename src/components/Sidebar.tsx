@@ -19,7 +19,7 @@ function GrowthBadge({ g }: { g: Growth }) {
   const text = fmtGrowth(g);
   if (g.kind === 'new') {
     return (
-      <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-sky-600 dark:text-sky-300 tabular-nums">
+      <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-bold text-amber-700 ring-1 ring-amber-500/30 dark:bg-amber-500/25 dark:text-amber-300 tabular-nums">
         <Sparkles className="h-2.5 w-2.5" />
         New
       </span>
@@ -37,11 +37,11 @@ function GrowthBadge({ g }: { g: Growth }) {
   const isDown = val < 0;
   return (
     <span
-      className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
+      className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${
         isUp
-          ? 'bg-up/15 text-up dark:text-up-light'
+          ? 'bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30 dark:bg-emerald-500/25 dark:text-emerald-300'
           : isDown
-            ? 'bg-down/15 text-down dark:text-down-light'
+            ? 'bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/30 dark:bg-rose-500/25 dark:text-rose-300'
             : 'bg-slate-500/10 text-slate-600 dark:text-slate-400'
       }`}
     >
@@ -150,24 +150,24 @@ export const Sidebar: React.FC = () => {
 
       <aside
         aria-label="Sales Lines navigation"
-        className={`glass-panel shrink-0 flex-col border-r border-slate-200/70 dark:border-slate-800/80 transition-all duration-200 ${
+        className={`glass-panel shrink-0 flex-col border-r border-indigo-200/70 dark:border-slate-800/80 transition-all duration-200 ${
           mobileDrawerOpen
             ? 'fixed inset-y-0 left-0 z-50 flex w-72 shadow-2xl'
             : `hidden md:flex ${sidebarCollapsed ? 'w-16' : 'w-72'}`
         }`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-slate-800/70 px-3 py-3.5">
+        <div className="flex items-center justify-between border-b border-indigo-200/60 bg-gradient-to-r from-indigo-50/70 via-violet-50/40 to-transparent px-3 py-3.5 dark:border-slate-800/70 dark:from-indigo-950/40">
           {(!sidebarCollapsed || mobileDrawerOpen) && (
             <div className="flex items-center gap-2 overflow-hidden">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-sm">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 via-violet-600 to-cyan-500 text-white shadow-sm">
                 <Layers className="h-4 w-4" />
               </div>
               <div className="truncate">
-                <h1 className="truncate text-sm font-bold tracking-tight text-slate-900 dark:text-white">
+                <h1 className="truncate text-sm font-extrabold tracking-tight text-indigo-950 dark:text-white">
                   Sales Lines
                 </h1>
-                <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                <p className="truncate text-[11px] font-medium text-indigo-600/80 dark:text-indigo-300/80">
                   Sorted by CY Value
                 </p>
               </div>
@@ -178,7 +178,7 @@ export const Sidebar: React.FC = () => {
               type="button"
               onClick={() => setMobileDrawerOpen(false)}
               aria-label="Close sidebar"
-              className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white md:hidden"
+              className="rounded-lg p-1.5 text-slate-500 hover:bg-indigo-500/10 hover:text-indigo-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white md:hidden"
             >
               <X className="h-4 w-4" />
             </button>
@@ -187,7 +187,7 @@ export const Sidebar: React.FC = () => {
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="hidden md:inline-flex rounded-lg p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="hidden md:inline-flex rounded-lg p-1.5 text-indigo-600 hover:bg-indigo-500/10 hover:text-indigo-900 dark:text-indigo-300 dark:hover:bg-slate-800 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
@@ -198,14 +198,14 @@ export const Sidebar: React.FC = () => {
         {(!sidebarCollapsed || mobileDrawerOpen) && (
           <div className="px-3 pt-2.5 pb-1.5">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-indigo-400" />
               <input
                 type="search"
                 value={sidebarSearch}
                 onChange={(e) => setSidebarSearch(e.target.value)}
                 placeholder="Filter lines..."
                 aria-label="Filter sales lines"
-                className="w-full rounded-lg border border-slate-200/80 bg-white/60 py-1.5 pl-8 pr-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-slate-700/80 dark:bg-slate-900/50 dark:text-slate-100"
+                className="w-full rounded-xl border border-indigo-200/80 bg-white/80 py-1.5 pl-8 pr-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700/80 dark:bg-slate-900/60 dark:text-slate-100"
               />
             </div>
           </div>
@@ -230,10 +230,10 @@ export const Sidebar: React.FC = () => {
                 onClick={() => selectLine(null)}
                 onKeyDown={(e) => handleKeyDown(e, null)}
                 title={`All Lines — CY Value: EGP ${fmtCompact(allLinesCells.sums.cyV)} (${fmtGrowth(allLinesCells.cells.growth)})`}
-                className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                   active
-                    ? 'bg-gradient-to-r from-sky-600 to-indigo-600 font-semibold text-white shadow-sm'
-                    : 'text-slate-700 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/70'
+                    ? 'bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-600 font-semibold text-white shadow-md'
+                    : 'text-slate-700 hover:bg-indigo-500/10 dark:text-slate-300 dark:hover:bg-slate-800/70'
                 }`}
               >
                 {sidebarCollapsed && !mobileDrawerOpen ? (
@@ -242,11 +242,11 @@ export const Sidebar: React.FC = () => {
                   <>
                     <div className="min-w-0 flex-1 pr-2">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate font-semibold">All Lines</span>
+                        <span className="truncate font-bold">All Lines</span>
                         {fCount > 0 && (
                           <span
                             className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                              active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
+                              active ? 'bg-white/25 text-white' : 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-300'
                             }`}
                           >
                             {fCount}
@@ -254,14 +254,14 @@ export const Sidebar: React.FC = () => {
                         )}
                       </div>
                       <div
-                        className={`text-[11px] tabular-nums ${
-                          active ? 'text-sky-100' : 'text-slate-500 dark:text-slate-400'
+                        className={`text-[11px] font-medium tabular-nums ${
+                          active ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'
                         }`}
                       >
                         EGP {fmtCompact(allLinesCells.sums.cyV)}
                       </div>
                     </div>
-                    <div className={active ? 'rounded-full bg-white/90 p-0.5' : ''}>
+                    <div className={active ? 'rounded-full bg-white/95 p-0.5 shadow-sm' : ''}>
                       <GrowthBadge g={allLinesCells.cells.growth} />
                     </div>
                   </>
@@ -270,7 +270,7 @@ export const Sidebar: React.FC = () => {
             );
           })()}
 
-          <div className="my-1.5 border-t border-slate-200/60 dark:border-slate-800/70" />
+          <div className="my-1.5 border-t border-indigo-200/60 dark:border-slate-800/70" />
 
           {sortedLines.map((item) => {
             const active = line === item.name;
@@ -291,10 +291,10 @@ export const Sidebar: React.FC = () => {
                 onClick={() => selectLine(item.name)}
                 onKeyDown={(e) => handleKeyDown(e, item.name)}
                 title={`${item.name} — CY Value: EGP ${fmtCompact(item.sums.cyV)} (${fmtGrowth(item.cells.growth)})`}
-                className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                   active
-                    ? 'bg-gradient-to-r from-sky-600 to-indigo-600 font-semibold text-white shadow-sm'
-                    : 'text-slate-700 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/70'
+                    ? 'bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-600 font-semibold text-white shadow-md'
+                    : 'text-slate-700 hover:bg-indigo-500/10 dark:text-slate-300 dark:hover:bg-slate-800/70'
                 }`}
               >
                 {sidebarCollapsed && !mobileDrawerOpen ? (
@@ -303,13 +303,13 @@ export const Sidebar: React.FC = () => {
                   <>
                     <div className="min-w-0 flex-1 pr-2">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate" dir="auto">
+                        <span className="truncate font-medium" dir="auto">
                           {item.name}
                         </span>
                         {fCount > 0 && (
                           <span
                             className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                              active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
+                              active ? 'bg-white/25 text-white' : 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-300'
                             }`}
                           >
                             {fCount}
@@ -317,14 +317,14 @@ export const Sidebar: React.FC = () => {
                         )}
                       </div>
                       <div
-                        className={`text-[11px] tabular-nums ${
-                          active ? 'text-sky-100' : 'text-slate-500 dark:text-slate-400'
+                        className={`text-[11px] font-medium tabular-nums ${
+                          active ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'
                         }`}
                       >
                         EGP {fmtCompact(item.sums.cyV)}
                       </div>
                     </div>
-                    <div className={active ? 'rounded-full bg-white/90 p-0.5' : ''}>
+                    <div className={active ? 'rounded-full bg-white/95 p-0.5 shadow-sm' : ''}>
                       <GrowthBadge g={item.cells.growth} />
                     </div>
                   </>
@@ -335,7 +335,7 @@ export const Sidebar: React.FC = () => {
         </nav>
 
         {(!sidebarCollapsed || mobileDrawerOpen) && (
-          <div className="border-t border-slate-200/60 dark:border-slate-800/70 px-3 py-2 text-[11px] text-slate-400 dark:text-slate-500">
+          <div className="border-t border-indigo-200/60 bg-indigo-50/40 px-3 py-2 text-[11px] font-medium text-indigo-700/80 dark:border-slate-800/70 dark:bg-slate-900/40 dark:text-indigo-300/70">
             {sortedLines.length} lines · click to filter
           </div>
         )}

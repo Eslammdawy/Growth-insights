@@ -78,7 +78,7 @@ export const Dashboard: React.FC = () => {
   }, [loadSampleData]);
 
   return (
-    <div className="relative flex min-h-screen bg-gradient-to-br from-slate-100 via-sky-50/40 to-indigo-100/50 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/60 dark:text-slate-100">
+    <div className="relative flex min-h-screen bg-gradient-to-br from-indigo-50/90 via-sky-50/70 to-fuchsia-50/60 text-slate-900 dark:from-slate-950 dark:via-indigo-950/60 dark:to-slate-900 dark:text-slate-100">
       {/* Left Sidebar / Mobile Drawer */}
       <Sidebar />
 

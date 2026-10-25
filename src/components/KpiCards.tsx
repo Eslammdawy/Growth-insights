@@ -41,14 +41,14 @@ function MonthlySparkline({
   const cyCoords = points.map((p, i) => `${getX(i).toFixed(1)},${getY(p.cy).toFixed(1)}`).join(' ');
 
   return (
-    <div className="mt-1 flex items-center justify-between gap-1 text-[11px] text-slate-400 dark:text-slate-500">
-      <div className="flex items-center gap-1.5 font-medium">
+    <div className="mt-1.5 flex items-center justify-between gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+      <div className="flex items-center gap-2 font-semibold">
         <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-400" />
+          <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
           PY
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
+          <span className="inline-block h-2 w-2 rounded-full bg-cyan-500" />
           CY
         </span>
       </div>
@@ -59,15 +59,15 @@ function MonthlySparkline({
       >
         <polyline
           fill="none"
-          stroke="#94a3b8"
-          strokeWidth="1.5"
-          strokeDasharray="2 2"
+          stroke="#8b5cf6"
+          strokeWidth="1.75"
+          strokeDasharray="2.5 2"
           points={pyCoords}
         />
         <polyline
           fill="none"
-          stroke="#0284c7"
-          strokeWidth="1.5"
+          stroke="#06b6d4"
+          strokeWidth="2"
           points={cyCoords}
         />
         {points.length > 0 && (
@@ -75,14 +75,14 @@ function MonthlySparkline({
             <circle
               cx={getX(points.length - 1)}
               cy={getY(points[points.length - 1].py)}
-              r="2"
-              fill="#94a3b8"
+              r="2.5"
+              fill="#8b5cf6"
             />
             <circle
               cx={getX(points.length - 1)}
               cy={getY(points[points.length - 1].cy)}
-              r="2"
-              fill="#0284c7"
+              r="2.5"
+              fill="#06b6d4"
             />
           </>
         )}
@@ -111,50 +111,55 @@ export const KpiCards: React.FC = () => {
     <section
       aria-label="Key Performance Indicators"
       aria-live="polite"
-      className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4"
+      className="relative z-10 grid grid-cols-1 gap-3 sm:grid-cols-3"
     >
-      {/* PY Total */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
-        <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
-          <span>Prior Period ({result.period.pyLabel})</span>
-          <span className="rounded-md bg-slate-200/70 dark:bg-slate-800 px-1.5 py-0.5 text-[10px]">
-            {unitLabel}
-          </span>
-        </div>
-        <div className="mt-1.5 text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums">
-          {fmtMetric(cells.py, metric)}
-        </div>
-        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
-          Units: {fmtMetric(result.totals.pyQ, 'units')} · Value: {fmtMetric(result.totals.pyV, 'value')}
-        </div>
-      </div>
-
-      {/* CY Total */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
-        <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+      {/* CY Total (with Prior Period in metadata) */}
+      <div className="glass-panel relative overflow-hidden rounded-2xl border border-cyan-200/80 bg-gradient-to-br from-white/95 via-cyan-50/40 to-sky-50/50 p-3.5 dark:border-cyan-500/30 dark:from-slate-900/95 dark:via-cyan-950/35 dark:to-sky-950/30">
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600" />
+        <div className="flex items-center justify-between text-xs font-semibold text-cyan-950/80 dark:text-cyan-200">
           <span>Current Period ({result.period.cyLabel})</span>
-          <span className="rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+          <span className="rounded-md bg-cyan-500/15 px-2 py-0.5 text-[10px] font-bold text-cyan-800 ring-1 ring-cyan-500/25 dark:bg-cyan-500/25 dark:text-cyan-200">
             {unitLabel}
           </span>
         </div>
         <div className="mt-1.5 text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums">
           {fmtMetric(cells.cy, metric)}
         </div>
-        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
-          Units: {fmtMetric(result.totals.cyQ, 'units')} · Value: {fmtMetric(result.totals.cyV, 'value')}
+        <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+          Prior Period ({result.period.pyLabel}):{' '}
+          <span className="font-semibold text-violet-700 dark:text-violet-300">
+            {fmtMetric(cells.py, metric)}
+          </span>
         </div>
       </div>
 
       {/* YoY Growth % */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
-        <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+      <div
+        className={`glass-panel relative overflow-hidden rounded-2xl border p-3.5 ${
+          isUp
+            ? 'border-emerald-200/80 bg-gradient-to-br from-white/95 via-emerald-50/40 to-teal-50/50 dark:border-emerald-500/30 dark:from-slate-900/95 dark:via-emerald-950/35 dark:to-teal-950/30'
+            : isDown
+              ? 'border-rose-200/80 bg-gradient-to-br from-white/95 via-rose-50/40 to-pink-50/50 dark:border-rose-500/30 dark:from-slate-900/95 dark:via-rose-950/35 dark:to-pink-950/30'
+              : 'border-slate-200/80 p-3.5 dark:border-slate-800/80'
+        }`}
+      >
+        <div
+          className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${
+            isUp
+              ? 'from-emerald-500 via-teal-500 to-cyan-500'
+              : isDown
+                ? 'from-rose-500 via-pink-500 to-orange-500'
+                : 'from-slate-400 to-slate-500'
+          }`}
+        />
+        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
           <span>YoY Growth %</span>
           <span
-            className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+            className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-bold shadow-sm ${
               isUp
-                ? 'bg-up/15 text-up dark:text-up-light'
+                ? 'bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30 dark:bg-emerald-500/25 dark:text-emerald-300'
                 : isDown
-                  ? 'bg-down/15 text-down dark:text-down-light'
+                  ? 'bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/30 dark:bg-rose-500/25 dark:text-rose-300'
                   : 'bg-slate-500/15 text-slate-600 dark:text-slate-300'
             }`}
           >
@@ -173,9 +178,9 @@ export const KpiCards: React.FC = () => {
         <div
           className={`mt-1.5 flex items-baseline gap-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${
             isUp
-              ? 'text-up dark:text-up-light'
+              ? 'text-emerald-600 dark:text-emerald-400'
               : isDown
-                ? 'text-down dark:text-down-light'
+                ? 'text-rose-600 dark:text-rose-400'
                 : 'text-slate-900 dark:text-white'
           }`}
         >
@@ -186,25 +191,42 @@ export const KpiCards: React.FC = () => {
       </div>
 
       {/* YoY Growth (Δ) */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
-        <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+      <div
+        className={`glass-panel relative overflow-hidden rounded-2xl border p-3.5 ${
+          isUp
+            ? 'border-teal-200/80 bg-gradient-to-br from-white/95 via-teal-50/40 to-emerald-50/50 dark:border-teal-500/30 dark:from-slate-900/95 dark:via-teal-950/35 dark:to-emerald-950/30'
+            : isDown
+              ? 'border-orange-200/80 bg-gradient-to-br from-white/95 via-orange-50/40 to-rose-50/50 dark:border-orange-500/30 dark:from-slate-900/95 dark:via-orange-950/35 dark:to-rose-950/30'
+              : 'border-slate-200/80 p-3.5 dark:border-slate-800/80'
+        }`}
+      >
+        <div
+          className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${
+            isUp
+              ? 'from-teal-500 via-emerald-500 to-green-500'
+              : isDown
+                ? 'from-orange-500 via-rose-500 to-red-500'
+                : 'from-slate-400 to-slate-500'
+          }`}
+        />
+        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
           <span>YoY Growth (Δ)</span>
-          <span className="text-[11px] tabular-nums text-slate-400">
+          <span className="rounded-md bg-indigo-500/10 px-2 py-0.5 text-[11px] font-bold tabular-nums text-indigo-700 ring-1 ring-indigo-500/20 dark:bg-indigo-500/20 dark:text-indigo-300">
             {result.matchedRows.toLocaleString('en-US')} tx rows
           </span>
         </div>
         <div
           className={`mt-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${
             isUp
-              ? 'text-up dark:text-up-light'
+              ? 'text-emerald-600 dark:text-emerald-400'
               : isDown
-                ? 'text-down dark:text-down-light'
+                ? 'text-rose-600 dark:text-rose-400'
                 : 'text-slate-900 dark:text-white'
           }`}
         >
           {fmtSigned(cells.delta, metric)}
         </div>
-        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
+        <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">
           CY − PY ({unitLabel})
         </div>
       </div>
