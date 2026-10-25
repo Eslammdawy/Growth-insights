@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { BarChart3 } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -37,7 +38,19 @@ export const MonthChart: React.FC = () => {
     });
   }, [result, metric]);
 
-  if (!result || data.length === 0) return null;
+  if (!result || data.length === 0) {
+    return (
+      <div className="glass-panel flex h-[340px] flex-col items-center justify-center rounded-2xl border border-slate-200/70 p-6 text-center dark:border-slate-800/80">
+        <BarChart3 className="h-8 w-8 text-slate-400 dark:text-slate-500" />
+        <h3 className="mt-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+          Monthly Trend ({METRIC_LABEL[metric]})
+        </h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          No monthly data available for the current selection.
+        </p>
+      </div>
+    );
+  }
 
   const isDark = theme === 'dark';
   const gridColor = isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.25)';
@@ -66,7 +79,7 @@ export const MonthChart: React.FC = () => {
         </div>
       </div>
 
-      <div className="h-40 w-full">
+      <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 6, right: 12, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />

@@ -499,7 +499,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     <section
       id={`table-${level}`}
       aria-label={`${label} level table`}
-      className="glass-panel flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 dark:border-slate-800/80 scroll-mt-20"
+      className="glass-panel flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 dark:border-slate-800/80 scroll-mt-28"
     >
       {/* Table toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 px-3.5 py-2 dark:border-slate-800/80">

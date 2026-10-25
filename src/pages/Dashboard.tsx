@@ -7,6 +7,7 @@ import { Filters } from '../components/Filters';
 import { KpiCards } from '../components/KpiCards';
 import { LevelTable } from '../components/LevelTable';
 import { Sidebar } from '../components/Sidebar';
+import { TableJumpBar } from '../components/TableJumpBar';
 import { TopBar } from '../components/TopBar';
 import { LEVEL_LABEL, LEVELS } from '../lib/aggregate';
 import { getHashSnapshot, subscribeHash } from '../lib/hashState';
@@ -163,6 +164,9 @@ export const Dashboard: React.FC = () => {
                   </Suspense>
                 </ErrorBoundary>
               </div>
+
+              {/* In-page jump bar */}
+              <TableJumpBar />
 
               {/* Stacked Level Tables: SubType, Distributor, Territory, Brick, Customer */}
               <div className={`space-y-4 pt-1 transition-opacity duration-200 ${analyzing ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>

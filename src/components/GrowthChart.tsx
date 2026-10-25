@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { TrendingUp } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -59,7 +60,19 @@ export const GrowthChart: React.FC = () => {
     return enriched.slice(0, 10);
   }, [rows, result, metric, chartMode]);
 
-  if (!result || chartData.length === 0) return null;
+  if (!result || chartData.length === 0) {
+    return (
+      <div className="glass-panel flex h-[340px] flex-col items-center justify-center rounded-2xl border border-slate-200/70 p-6 text-center dark:border-slate-800/80">
+        <TrendingUp className="h-8 w-8 text-slate-400 dark:text-slate-500" />
+        <h3 className="mt-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+          YoY Growth Chart
+        </h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          No growth data available for the current selection.
+        </p>
+      </div>
+    );
+  }
 
   const isDark = theme === 'dark';
   const gridColor = isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.25)';
@@ -126,7 +139,7 @@ export const GrowthChart: React.FC = () => {
         </div>
       </div>
 
-      <div className="h-40 w-full">
+      <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={chartData}

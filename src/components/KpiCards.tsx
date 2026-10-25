@@ -5,6 +5,92 @@ import { metricCells } from '../lib/metrics';
 import { useShallow } from 'zustand/react/shallow';
 import { useDashboardStore } from '../store/useDashboardStore';
 
+function MonthlySparkline({
+  months,
+  metric,
+}: {
+  months: { label: string; sums: { pyQ: number; pyV: number; cyQ: number; cyV: number } }[];
+  metric: 'units' | 'value';
+}) {
+  if (!months || months.length === 0) return null;
+
+  const points = months.map((m) => {
+    const py = metric === 'units' ? m.sums.pyQ : m.sums.pyV;
+    const cy = metric === 'units' ? m.sums.cyQ : m.sums.cyV;
+    return { label: m.label, py, cy };
+  });
+
+  const allVals = points.flatMap((p) => [p.py, p.cy]);
+  const minVal = Math.min(0, ...allVals);
+  const maxVal = Math.max(1, ...allVals);
+  const range = maxVal - minVal || 1;
+
+  const width = 110;
+  const height = 24;
+  const paddingX = 6;
+  const paddingY = 4;
+  const usableW = width - paddingX * 2;
+  const usableH = height - paddingY * 2;
+
+  const getX = (idx: number) =>
+    points.length === 1 ? width / 2 : paddingX + (idx / (points.length - 1)) * usableW;
+  const getY = (val: number) =>
+    height - paddingY - ((val - minVal) / range) * usableH;
+
+  const pyCoords = points.map((p, i) => `${getX(i).toFixed(1)},${getY(p.py).toFixed(1)}`).join(' ');
+  const cyCoords = points.map((p, i) => `${getX(i).toFixed(1)},${getY(p.cy).toFixed(1)}`).join(' ');
+
+  return (
+    <div className="mt-1 flex items-center justify-between gap-1 text-[11px] text-slate-400 dark:text-slate-500">
+      <div className="flex items-center gap-1.5 font-medium">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-400" />
+          PY
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
+          CY
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-5 w-24 overflow-visible"
+        aria-hidden="true"
+      >
+        <polyline
+          fill="none"
+          stroke="#94a3b8"
+          strokeWidth="1.5"
+          strokeDasharray="2 2"
+          points={pyCoords}
+        />
+        <polyline
+          fill="none"
+          stroke="#0284c7"
+          strokeWidth="1.5"
+          points={cyCoords}
+        />
+        {points.length > 0 && (
+          <>
+            <circle
+              cx={getX(points.length - 1)}
+              cy={getY(points[points.length - 1].py)}
+              r="2"
+              fill="#94a3b8"
+            />
+            <circle
+              cx={getX(points.length - 1)}
+              cy={getY(points[points.length - 1].cy)}
+              r="2"
+              fill="#0284c7"
+            />
+          </>
+        )}
+      </svg>
+    </div>
+  );
+}
+
 export const KpiCards: React.FC = () => {
   const { result, metric } = useDashboardStore(
     useShallow((s) => ({
@@ -96,9 +182,7 @@ export const KpiCards: React.FC = () => {
           <span>{isUp && cells.growth.kind === 'pct' ? '▲' : isDown ? '▼' : ''}</span>
           <span>{gText}</span>
         </div>
-        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-          (CY − PY) / |PY|
-        </div>
+        <MonthlySparkline months={result.months} metric={metric} />
       </div>
 
       {/* YoY Growth (Δ) */}
