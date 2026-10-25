@@ -2,26 +2,6 @@
 
 Client-side analytical dashboard that measures quarterly sales growth versus the same quarter prior year (YoY) from an Excel export or pre-converted columnar dataset.
 
-## Quick Start
-
-```bash
-cd app
-npm install
-
-# 1. Convert the 63 MB Excel workbook into a compact gzipped columnar dataset (~11 MB)
-npm run convert
-
-# 2. Start the development server
-npm run dev
-
-# 3. Run the Vitest acceptance test suite
-npm test
-
-# 4. Build a static bundle (relative paths, ready for any internal server / SharePoint folder)
-npm run build
-npm run preview
-```
-
 ## Architecture & Hybrid Data Loading
 
 The real export (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xlsx`) contains **494,242 rows** across 29 columns (~415 MB of uncompressed worksheet XML). To make loading instantaneous while still supporting direct browser `.xlsx` uploads:
