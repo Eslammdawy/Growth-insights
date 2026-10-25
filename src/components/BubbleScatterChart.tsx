@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useTransition } from 'react';
-import { CircleDot, Filter, RotateCcw, Table2 } from 'lucide-react';
+import { CircleDot, RotateCcw, Table2 } from 'lucide-react';
 import {
   CartesianGrid,
   Cell,
@@ -225,9 +225,6 @@ export const BubbleScatterChart: React.FC = () => {
                 <th className="border-b border-indigo-200/70 px-3 py-2 text-right dark:border-slate-800">
                   YoY % (Y)
                 </th>
-                <th className="border-b border-indigo-200/70 px-2 py-2 text-center dark:border-slate-800">
-                  Drill
-                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-indigo-100/60 dark:divide-slate-800/70">
@@ -264,17 +261,6 @@ export const BubbleScatterChart: React.FC = () => {
                     }`}
                   >
                     {fmtGrowth(pt.growth)}
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <button
-                      type="button"
-                      onClick={() => handleBubbleClick(pt)}
-                      title={`Add drill filter for ${pt.label}`}
-                      aria-label={`Add drill filter for ${pt.label}`}
-                      className="rounded-md p-1 text-indigo-600 hover:bg-indigo-500/15 dark:text-indigo-300"
-                    >
-                      <Filter className="h-3.5 w-3.5" />
-                    </button>
                   </td>
                 </tr>
               ))}
