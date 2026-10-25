@@ -36,7 +36,7 @@ export const MonthChart: React.FC = () => {
   const axisColor = isDark ? '#94a3b8' : '#64748b';
 
   return (
-    <div className="glass-panel flex flex-col rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
+    <div className="glass-panel flex flex-col rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3">
       <div className="mb-2 flex items-center justify-between">
         <div>
           <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
@@ -46,7 +46,7 @@ export const MonthChart: React.FC = () => {
             {period.pyYear} vs {period.cyYear} by month
           </p>
         </div>
-        <div className="flex gap-3 text-[11px] tabular-nums">
+        <div className="flex gap-2 text-[11px] tabular-nums">
           {data.map((d) => (
             <span
               key={d.month}
@@ -58,7 +58,7 @@ export const MonthChart: React.FC = () => {
         </div>
       </div>
 
-      <div className="h-44 w-full">
+      <div className="h-40 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 6, right: 12, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
@@ -91,8 +91,8 @@ export const MonthChart: React.FC = () => {
               wrapperStyle={{ fontSize: '11px' }}
               formatter={(v) => (v === 'PY' ? `PY (${period.pyYear})` : `CY (${period.cyYear})`)}
             />
-            <Bar dataKey="PY" fill="#94a3b8" radius={[6, 6, 0, 0]} maxBarSize={36} />
-            <Bar dataKey="CY" fill="#0284c7" radius={[6, 6, 0, 0]} maxBarSize={36} />
+            <Bar dataKey="PY" fill="#94a3b8" radius={[6, 6, 0, 0]} maxBarSize={32} />
+            <Bar dataKey="CY" fill="#0284c7" radius={[6, 6, 0, 0]} maxBarSize={32} />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -1,12 +1,9 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import {
   Calendar,
   Database,
-  Download,
-  FileSpreadsheet,
   Moon,
   Sun,
-  Upload,
   CheckCircle2,
   AlertTriangle,
 } from 'lucide-react';
@@ -14,12 +11,7 @@ import { METRICS, METRIC_LABEL } from '../lib/metrics';
 import { MONTH_ABBR, quarterMonths } from '../lib/periods';
 import { useDashboardStore } from '../store/useDashboardStore';
 
-interface TopBarProps {
-  onExportCsv: () => void;
-  onExportXlsx: () => void;
-}
-
-export const TopBar: React.FC<TopBarProps> = ({ onExportCsv, onExportXlsx }) => {
+export const TopBar: React.FC = () => {
   const {
     meta,
     sourceName,
@@ -28,20 +20,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onExportCsv, onExportXlsx }) => 
     setMetric,
     period,
     setPeriod,
-    loadSampleData,
-    loadFile,
     theme,
     toggleTheme,
-    loading,
   } = useDashboardStore();
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const years = meta?.availability.years ?? [2025, 2026];
   const qMonths = quarterMonths(period.quarter);
 
   return (
-    <header className="glass-panel sticky top-0 z-30 border-b border-slate-200/70 dark:border-slate-800/80 px-4 py-2.5">
+    <header className="glass-panel sticky top-0 z-30 border-b border-slate-200/70 dark:border-slate-800/80 px-4 py-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Brand & Period Banner */}
         <div className="flex flex-wrap items-center gap-3">
@@ -76,7 +63,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onExportCsv, onExportXlsx }) => 
 
         {/* Center: Metric Segmented Toggle + Period Controls + Like-for-like */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Metric Segmented Control */}
+          {/* Metric Segmented Control (Units vs Value only) */}
           <div
             role="group"
             aria-label="Primary metric"
@@ -198,69 +185,14 @@ export const TopBar: React.FC<TopBarProps> = ({ onExportCsv, onExportXlsx }) => 
           </label>
         </div>
 
-        {/* Right: Data Upload, Sample, Exports, Theme */}
-        <div className="flex items-center gap-1.5">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.json,.gz"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void loadFile(f);
-              e.target.value = '';
-            }}
-            className="hidden"
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-            title="Upload .xlsx workbook or converted .json.gz"
-          >
-            <Upload className="h-3.5 w-3.5 text-sky-500" />
-            <span className="hidden md:inline">Upload</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void loadSampleData()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-            title="Load pre-converted Q3-2026 sample dataset"
-          >
-            <Database className="h-3.5 w-3.5 text-indigo-500" />
-            <span className="hidden lg:inline">Load sample data</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onExportCsv}
-            disabled={!result}
-            className="inline-flex items-center gap-1 rounded-xl border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:opacity-40 dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-            title="Export visible table (with all 3 metrics) to CSV"
-          >
-            <Download className="h-3.5 w-3.5 text-emerald-500" />
-            <span>CSV</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onExportXlsx}
-            disabled={!result}
-            className="inline-flex items-center gap-1 rounded-xl border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:opacity-40 dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-            title="Export visible table (with all 3 metrics) to Excel (.xlsx)"
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Excel</span>
-          </button>
-
+        {/* Right: Theme Toggle moved to Header */}
+        <div className="flex items-center">
           <button
             type="button"
             onClick={toggleTheme}
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="rounded-xl border border-slate-200/80 bg-white/70 p-1.5 text-slate-700 hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+            className="rounded-xl border border-slate-200/80 bg-white/70 p-2 text-slate-700 hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
           >
             {theme === 'dark' ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
           </button>

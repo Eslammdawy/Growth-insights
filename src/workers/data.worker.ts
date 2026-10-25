@@ -3,19 +3,31 @@
  * and runs single-pass aggregations without blocking the UI.
  */
 import { gunzipSync } from 'fflate';
-import { AnalysisQuery, AnalysisResult, DatasetMeta, analyze, buildMeta, prepare } from '../lib/aggregate';
+import {
+  AnalysisQuery,
+  AnalysisResult,
+  DatasetMeta,
+  GroupRow,
+  ItemTarget,
+  analyze,
+  analyzeItems,
+  buildMeta,
+  prepare,
+} from '../lib/aggregate';
 import { DataError, Dataset, decodeDataset, validateDataset } from '../lib/columnar';
 import { ParseProgress, blobSource, parseXlsx } from '../lib/parse';
 
 export type WorkerRequest =
   | { id: number; type: 'load-url'; url: string }
   | { id: number; type: 'load-file'; file: File }
-  | { id: number; type: 'analyze'; query: AnalysisQuery };
+  | { id: number; type: 'analyze'; query: AnalysisQuery }
+  | { id: number; type: 'items'; query: AnalysisQuery; target: ItemTarget };
 
 export type WorkerResponse =
   | { id: number; type: 'progress'; progress: ParseProgress }
   | { id: number; type: 'loaded'; meta: DatasetMeta; sourceName: string }
   | { id: number; type: 'analyzed'; result: AnalysisResult }
+  | { id: number; type: 'items'; rows: GroupRow[] }
   | { id: number; type: 'error'; message: string; kind?: string; details?: string[] };
 
 let currentDataset: Dataset | null = null;
@@ -100,6 +112,12 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       }
       const result = analyze(currentDataset, msg.query);
       send({ id: msg.id, type: 'analyzed', result });
+    } else if (msg.type === 'items') {
+      if (!currentDataset) {
+        throw new DataError('empty', 'No dataset loaded yet.');
+      }
+      const rows = analyzeItems(currentDataset, msg.query, msg.target);
+      send({ id: msg.id, type: 'items', rows });
     }
   } catch (err) {
     if (err instanceof DataError) {

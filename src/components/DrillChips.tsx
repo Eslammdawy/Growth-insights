@@ -1,5 +1,6 @@
 import React from 'react';
 import { FilterX, Navigation, X } from 'lucide-react';
+import { DRILL_FIELD_LABEL } from '../lib/aggregate';
 import { useDashboardStore } from '../store/useDashboardStore';
 
 export const DrillChips: React.FC = () => {
@@ -21,7 +22,7 @@ export const DrillChips: React.FC = () => {
             {idx > 0 && <span className="text-xs text-slate-400">→</span>}
             <span className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-800 shadow-sm dark:bg-slate-900/80 dark:text-slate-100">
               <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
-                {chip.field}:
+                {DRILL_FIELD_LABEL[chip.field]}:
               </span>
               <span dir="auto">{chip.label}</span>
               <button

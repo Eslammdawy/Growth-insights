@@ -1,7 +1,7 @@
 /**
  * Promise wrapper around `data.worker.ts` with progress callbacks.
  */
-import { AnalysisQuery, AnalysisResult, DatasetMeta } from '../lib/aggregate';
+import { AnalysisQuery, AnalysisResult, DatasetMeta, GroupRow, ItemTarget } from '../lib/aggregate';
 import { DataError, DataErrorKind } from '../lib/columnar';
 import { ParseProgress } from '../lib/parse';
 import type { WorkerRequest, WorkerResponse } from './data.worker';
@@ -15,7 +15,8 @@ type Pending = {
 type WorkerPayload =
   | { type: 'load-url'; url: string }
   | { type: 'load-file'; file: File }
-  | { type: 'analyze'; query: AnalysisQuery };
+  | { type: 'analyze'; query: AnalysisQuery }
+  | { type: 'items'; query: AnalysisQuery; target: ItemTarget };
 
 class DataWorkerClient {
   private worker: Worker | null = null;
@@ -40,6 +41,8 @@ class DataWorkerClient {
           p.resolve({ meta: msg.meta, sourceName: msg.sourceName });
         } else if (msg.type === 'analyzed') {
           p.resolve(msg.result);
+        } else if (msg.type === 'items') {
+          p.resolve(msg.rows);
         }
       };
     }
@@ -65,6 +68,11 @@ class DataWorkerClient {
 
   analyze(query: AnalysisQuery): Promise<AnalysisResult> {
     return this.call({ type: 'analyze', query });
+  }
+
+  /** Item breakdown of one table row. */
+  items(query: AnalysisQuery, target: ItemTarget): Promise<GroupRow[]> {
+    return this.call({ type: 'items', query, target });
   }
 }
 

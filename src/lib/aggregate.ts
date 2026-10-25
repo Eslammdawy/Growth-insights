@@ -2,6 +2,10 @@
  * Aggregation engine: a single pass over the columnar dataset per query.
  * Pure functions (memoised per dataset via WeakMap) so they run identically on the main thread,
  * in the Web Worker and in tests.
+ *
+ * Customer identity: rows with the same CustomerID AND CustomerName are one customer. Every row of a
+ * customer is attributed to the customer's latest (CY) Brick and the Territory recorded with it, so a
+ * customer that moved brick between PY and CY is compared like-for-like in its current brick.
  */
 import { EXPANDABLE_SUBTYPES, TxType, UNASSIGNED_CHAIN_LABEL, UNASSIGNED_LABEL } from './config';
 import { Dataset, StrColumn, numCol, strCol } from './columnar';
@@ -16,7 +20,8 @@ import {
 } from './periods';
 
 export type Level = 'subtype' | 'territory' | 'brick' | 'customer' | 'distributor';
-export const LEVELS: Level[] = ['subtype', 'territory', 'brick', 'customer', 'distributor'];
+/** Display order of the level tables on the dashboard. */
+export const LEVELS: Level[] = ['subtype', 'distributor', 'territory', 'brick', 'customer'];
 export const LEVEL_LABEL: Record<Level, string> = {
   subtype: 'SubType',
   territory: 'Territory',
@@ -33,15 +38,16 @@ export const LEVEL_FIELD: Record<Level, DrillField> = {
   customer: 'CustomerID',
   distributor: 'Distributor',
 };
-/** Drill-down auto-advance: SubType / Distributor → Territory → Brick → Customer (stay). */
-export const NEXT_LEVEL: Record<Level, Level> = {
-  subtype: 'territory',
-  distributor: 'territory',
-  territory: 'brick',
-  brick: 'customer',
-  customer: 'customer',
+export const DRILL_FIELD_LABEL: Record<DrillField, string> = {
+  SubType: 'SubType',
+  Chain: 'Chain',
+  Territory: 'Territory',
+  Brick: 'Brick',
+  CustomerID: 'Customer',
+  Distributor: 'Distributor',
 };
 
+/** Cross-filter chip (added from the filter button of a table row). */
 export interface DrillChip {
   field: DrillField;
   value: string;
@@ -57,12 +63,11 @@ export interface AnalysisQuery {
   items: string[];
   mainTypes: string[];
   drill: DrillChip[];
-  level: Level;
 }
 
 export interface GroupRow {
   id: string;
-  field: DrillField;
+  field: DrillField | 'Item';
   value: string;
   label: string;
   sums: Sums;
@@ -80,6 +85,8 @@ export interface GroupRow {
   brickOthers?: string[];
   subType?: string;
   subTypeOthers?: string[];
+  /** Item rows: brand of the item. */
+  brand?: string;
 }
 
 export interface LineSummary {
@@ -97,11 +104,20 @@ export interface AnalysisResult {
   period: ResolvedPeriod;
   totals: Sums;
   months: MonthPoint[];
-  rows: GroupRow[];
+  /** One table per level. */
+  levels: Record<Level, GroupRow[]>;
   /** Per-Line totals for the sidebar badges (respect global filters + drill chips, ignore Line/Brand/Item). */
   lines: LineSummary[];
   linesTotal: Sums;
   matchedRows: number;
+}
+
+/** Identifies the table row whose Item breakdown is requested. */
+export interface ItemTarget {
+  level: Level;
+  value: string;
+  /** Chain child of an expandable SubType row. */
+  chain?: string;
 }
 
 export interface DatasetMeta {
@@ -120,6 +136,7 @@ export interface DatasetMeta {
 // ---------------------------------------------------------------------------------------------
 
 interface CustomerInfo {
+  id: string;
   name: string;
   brick: string;
   subType: string;
@@ -142,25 +159,54 @@ export interface Prepared {
     item: StrColumn;
     mainType: StrColumn;
     subType: StrColumn;
+    /** Effective Brick: the customer's latest (CY) brick for every row of that customer. */
     brick: StrColumn;
+    /** Effective Territory: the territory recorded with the customer's latest brick. */
     territory: StrColumn;
     chain: StrColumn;
-    customerId: StrColumn;
-    customerName: StrColumn;
+    /** Customer key = CustomerID + CustomerName (one customer). */
+    customer: StrColumn;
     distributor: StrColumn;
     transactionType: StrColumn;
   };
   availability: PeriodAvailability;
-  customerInfo?: Map<number, CustomerInfo>;
+  customerInfo: Map<number, CustomerInfo>;
+  /** Brand of each item code (first seen). */
+  itemBrand: Int32Array;
 }
 
 const preparedCache = new WeakMap<Dataset, Prepared>();
+
+/** Separator inside customer key values (`<CustomerID>␟<CustomerName>`). */
+export const CUSTOMER_KEY_SEP = '\u241F';
 
 export function normTx(s: string): TxType | null {
   const k = s.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
   if (k === 'sales' || k === 'sale') return 'Sales';
   if (k === 'return sales' || k === 'returns sales' || k === 'return sale' || k === 'sales return' || k === 'sales returns') return 'Return Sales';
   return null;
+}
+
+/** Build the customer key column: same CustomerID + same CustomerName = one customer. Blank ID & Name → code 0. */
+function buildCustomerColumn(n: number, id: StrColumn, name: StrColumn): StrColumn {
+  const dict: string[] = [''];
+  const index = new Map<number, number>();
+  const codes = new Int32Array(n);
+  const nName = name.dict.length + 1;
+  for (let i = 0; i < n; i++) {
+    const ic = id.codes[i];
+    const nc = name.codes[i];
+    if (ic === 0 && nc === 0) continue;
+    const k = ic * nName + nc;
+    let code = index.get(k);
+    if (code === undefined) {
+      code = dict.length;
+      dict.push(`${id.dict[ic]}${CUSTOMER_KEY_SEP}${name.dict[nc]}`);
+      index.set(k, code);
+    }
+    codes[i] = code;
+  }
+  return { kind: 'str', name: 'Customer', dict, codes };
 }
 
 export function prepare(ds: Dataset): Prepared {
@@ -199,6 +245,48 @@ export function prepare(ds: Dataset): Prepared {
   const tx = new Uint8Array(n);
   for (let i = 0; i < n; i++) tx[i] = txOfCode[transactionType.codes[i]];
 
+  const customerId = strCol(ds, 'CustomerID');
+  const customerName = strCol(ds, 'CustomerName');
+  const rawBrick = strCol(ds, 'Brick');
+  const rawTerritory = strCol(ds, 'Territory');
+  const subType = strCol(ds, 'SubType');
+  const customer = buildCustomerColumn(n, customerId, customerName);
+
+  const { info, brickOf, territoryOf } = computeCustomers(
+    n,
+    periods,
+    periodIdx,
+    tx,
+    customer,
+    customerId,
+    customerName,
+    rawBrick,
+    rawTerritory,
+    subType,
+  );
+
+  // Effective Brick / Territory columns (same dictionaries, remapped codes).
+  const effBrick = new Int32Array(n);
+  const effTerr = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const cu = customer.codes[i];
+    if (cu !== 0 && brickOf[cu] >= 0) {
+      effBrick[i] = brickOf[cu];
+      effTerr[i] = territoryOf[cu];
+    } else {
+      effBrick[i] = rawBrick.codes[i];
+      effTerr[i] = rawTerritory.codes[i];
+    }
+  }
+
+  const item = strCol(ds, 'Item');
+  const brand = strCol(ds, 'Brand');
+  const itemBrand = new Int32Array(item.dict.length).fill(-1);
+  for (let i = 0; i < n; i++) {
+    const it = item.codes[i];
+    if (itemBrand[it] < 0) itemBrand[it] = brand.codes[i];
+  }
+
   const p: Prepared = {
     ds,
     n,
@@ -209,45 +297,59 @@ export function prepare(ds: Dataset): Prepared {
     tx,
     c: {
       line: strCol(ds, 'Line'),
-      brand: strCol(ds, 'Brand'),
-      item: strCol(ds, 'Item'),
+      brand,
+      item,
       mainType: strCol(ds, 'MainType'),
-      subType: strCol(ds, 'SubType'),
-      brick: strCol(ds, 'Brick'),
-      territory: strCol(ds, 'Territory'),
+      subType,
+      brick: { kind: 'str', name: 'Brick', dict: rawBrick.dict, codes: effBrick },
+      territory: { kind: 'str', name: 'Territory', dict: rawTerritory.dict, codes: effTerr },
       chain: strCol(ds, 'Chain'),
-      customerId: strCol(ds, 'CustomerID'),
-      customerName: strCol(ds, 'CustomerName'),
+      customer,
       distributor: strCol(ds, 'Distributor'),
       transactionType,
     },
     availability: availabilityFromPeriods(periods),
+    customerInfo: info,
+    itemBrand,
   };
   preparedCache.set(ds, p);
   return p;
 }
 
 /**
- * Customer attributes: Brick / SubType from the customer's most recent month (CY first, since CY is later),
+ * Customer attributes from the customer's most recent month (CY first, since CY is later),
  * computed over all rows of the dataset. Ties within the month → value with most rows, then first seen.
- * Others = every other Brick / SubType value seen for the customer anywhere in the dataset.
+ * The latest Brick is the customer's "true" brick; its Territory is the dominant territory recorded
+ * with that brick in the latest month. Others = every other Brick / SubType value seen for the customer.
  */
-export function customerInfo(p: Prepared): Map<number, CustomerInfo> {
-  if (p.customerInfo) return p.customerInfo;
-  const { customerId, customerName, brick, subType } = p.c;
-  const nCust = customerId.dict.length;
+function computeCustomers(
+  n: number,
+  date: number[],
+  periodIdx: Uint16Array,
+  tx: Uint8Array,
+  customer: StrColumn,
+  customerId: StrColumn,
+  customerName: StrColumn,
+  brick: StrColumn,
+  territory: StrColumn,
+  subType: StrColumn,
+): { info: Map<number, CustomerInfo>; brickOf: Int32Array; territoryOf: Int32Array } {
+  const nCust = customer.dict.length;
   const latest = new Float64Array(nCust).fill(-Infinity);
-  const date = p.periods;
-  for (let i = 0; i < p.n; i++) {
-    const c = customerId.codes[i];
-    const d = date[p.periodIdx[i]];
+  for (let i = 0; i < n; i++) {
+    if (!tx[i]) continue;
+    const c = customer.codes[i];
+    const d = date[periodIdx[i]];
     if (d > latest[c]) latest[c] = d;
   }
   const brickCount = new Map<number, Map<number, number>>();
   const subCount = new Map<number, Map<number, number>>();
+  const terrCount = new Map<number, Map<number, number>>(); // key: brick * nTerr + territory
   const brickAll = new Map<number, Set<number>>();
   const subAll = new Map<number, Set<number>>();
-  const nameCode = new Int32Array(nCust).fill(-1);
+  const idCode = new Int32Array(nCust);
+  const nameCode = new Int32Array(nCust);
+  const nTerr = territory.dict.length;
   const bump = (m: Map<number, Map<number, number>>, c: number, k: number) => {
     let mm = m.get(c);
     if (!mm) m.set(c, (mm = new Map()));
@@ -258,39 +360,48 @@ export function customerInfo(p: Prepared): Map<number, CustomerInfo> {
     if (!s) m.set(c, (s = new Set()));
     s.add(k);
   };
-  for (let i = 0; i < p.n; i++) {
-    const c = customerId.codes[i];
+  for (let i = 0; i < n; i++) {
+    if (!tx[i]) continue;
+    const c = customer.codes[i];
+    if (c === 0) continue;
     const b = brick.codes[i];
     const s = subType.codes[i];
+    idCode[c] = customerId.codes[i];
+    nameCode[c] = customerName.codes[i];
     add(brickAll, c, b);
     add(subAll, c, s);
-    if (date[p.periodIdx[i]] === latest[c]) {
+    if (date[periodIdx[i]] === latest[c]) {
       bump(brickCount, c, b);
       bump(subCount, c, s);
-      if (nameCode[c] <= 0) nameCode[c] = customerName.codes[i]; // first non-empty name in the latest month
+      bump(terrCount, c, b * nTerr + territory.codes[i]);
     }
   }
-  const pick = (m: Map<number, number> | undefined) => {
-    let best = 0;
+  const pick = (m: Map<number, number> | undefined, accept: (k: number) => boolean = () => true) => {
+    let best = -1;
     let bestN = -1;
-    if (m) for (const [k, cnt] of m) if (cnt > bestN) (best = k), (bestN = cnt);
+    if (m) for (const [k, cnt] of m) if (accept(k) && cnt > bestN) (best = k), (bestN = cnt);
     return best;
   };
-  const out = new Map<number, CustomerInfo>();
+  const info = new Map<number, CustomerInfo>();
+  const brickOf = new Int32Array(nCust).fill(-1);
+  const territoryOf = new Int32Array(nCust).fill(-1);
   for (const [c, bset] of brickAll) {
-    const b = pick(brickCount.get(c));
-    const s = pick(subCount.get(c));
+    const b = Math.max(0, pick(brickCount.get(c)));
+    const s = Math.max(0, pick(subCount.get(c)));
+    const tk = pick(terrCount.get(c), (k) => Math.floor(k / nTerr) === b);
+    brickOf[c] = b;
+    territoryOf[c] = tk < 0 ? 0 : tk % nTerr;
     const sset = subAll.get(c) ?? new Set<number>();
-    out.set(c, {
-      name: customerName.dict[Math.max(0, nameCode[c])],
+    info.set(c, {
+      id: customerId.dict[idCode[c]],
+      name: customerName.dict[nameCode[c]],
       brick: brick.dict[b],
       subType: subType.dict[s],
       brickOthers: [...bset].filter((k) => k !== b).map((k) => brick.dict[k] || UNASSIGNED_LABEL).sort(),
       subTypeOthers: [...sset].filter((k) => k !== s).map((k) => subType.dict[k] || UNASSIGNED_LABEL).sort(),
     });
   }
-  p.customerInfo = out;
-  return out;
+  return { info, brickOf, territoryOf };
 }
 
 export function buildMeta(ds: Dataset): DatasetMeta {
@@ -360,25 +471,38 @@ const DRILL_COL: Record<DrillField, keyof Prepared['c']> = {
   Chain: 'chain',
   Territory: 'territory',
   Brick: 'brick',
-  CustomerID: 'customerId',
+  CustomerID: 'customer',
   Distributor: 'distributor',
 };
 const LEVEL_COL: Record<Level, keyof Prepared['c']> = {
   subtype: 'subType',
   territory: 'territory',
   brick: 'brick',
-  customer: 'customerId',
+  customer: 'customer',
   distributor: 'distributor',
 };
 
 const sumsAt = (a: Float64Array, k: number): Sums => ({ pyQ: a[k * 4], pyV: a[k * 4 + 1], cyQ: a[k * 4 + 2], cyV: a[k * 4 + 3] });
 
-export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
+type Masks = [Int32Array, Uint8Array][];
+
+interface QueryContext {
+  p: Prepared;
+  period: ResolvedPeriod;
+  /** Per period index: 0 = outside, 1 = PY, 2 = CY */
+  pflag: Uint8Array;
+  monthOfP: Int32Array;
+  txAllowed: Uint8Array;
+  /** Global filters (affect sidebar badges). */
+  globalMasks: Masks;
+  /** Product filters (ignored by sidebar badges). */
+  productMasks: Masks;
+}
+
+function buildContext(ds: Dataset, query: AnalysisQuery): QueryContext {
   const p = prepare(ds);
   const period = resolvePeriod(p.availability, query.period);
   const c = p.c;
-
-  // Period flags per period index: 1 = PY, 2 = CY
   const pyS = new Set(period.pyPeriods);
   const cyS = new Set(period.cyPeriods);
   const pflag = new Uint8Array(p.periods.length);
@@ -387,12 +511,10 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     pflag[k] = cyS.has(d) ? 2 : pyS.has(d) ? 1 : 0;
     monthOfP[k] = d % 100;
   });
-
   const txAllowed = new Uint8Array(3);
   for (const t of query.txTypes) txAllowed[t === 'Sales' ? 1 : 2] = 1;
 
-  // Global filters (affect sidebar badges)
-  const globalMasks: [Int32Array, Uint8Array][] = [];
+  const globalMasks: Masks = [];
   const mt = mask(c.mainType, query.mainTypes);
   if (mt) globalMasks.push([c.mainType.codes, mt]);
   const byField = new Map<DrillField, string[]>();
@@ -401,42 +523,57 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     const col = c[DRILL_COL[field]];
     globalMasks.push([col.codes, mask(col, values)!]);
   }
-  // Product filters (ignored by sidebar badges)
-  const productMasks: [Int32Array, Uint8Array][] = [];
+  const productMasks: Masks = [];
   const lm = query.line === null ? null : mask(c.line, [query.line]);
   if (lm) productMasks.push([c.line.codes, lm]);
   const bm = mask(c.brand, query.brands);
   if (bm) productMasks.push([c.brand.codes, bm]);
   const im = mask(c.item, query.items);
   if (im) productMasks.push([c.item.codes, im]);
+  return { p, period, pflag, monthOfP, txAllowed, globalMasks, productMasks };
+}
+
+interface LevelAcc {
+  level: Level;
+  col: StrColumn;
+  acc: Float64Array;
+  cnt: Int32Array;
+}
+
+export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
+  const ctx = buildContext(ds, query);
+  const { p, period, pflag, monthOfP, txAllowed, globalMasks, productMasks } = ctx;
+  const c = p.c;
 
   const lineAcc = new Float64Array(c.line.dict.length * 4);
   const lineCnt = new Int32Array(c.line.dict.length);
   const monthAcc = new Float64Array(13 * 4);
-  const groupCol = c[LEVEL_COL[query.level]];
-  const gcodes = groupCol.codes;
-  const gAcc = new Float64Array(groupCol.dict.length * 4);
-  const gCnt = new Int32Array(groupCol.dict.length);
+  const levelAccs: LevelAcc[] = LEVELS.map((level) => {
+    const col = c[LEVEL_COL[level]];
+    return { level, col, acc: new Float64Array(col.dict.length * 4), cnt: new Int32Array(col.dict.length) };
+  });
   const totals = emptySums();
   let matched = 0;
 
   // SubType → Chain children
   const expandable = new Uint8Array(c.subType.dict.length);
-  if (query.level === 'subtype') {
-    const ex = new Set(EXPANDABLE_SUBTYPES);
-    c.subType.dict.forEach((s, k) => (expandable[k] = ex.has(s) ? 1 : 0));
-  }
+  const ex = new Set(EXPANDABLE_SUBTYPES);
+  c.subType.dict.forEach((s, k) => (expandable[k] = ex.has(s) ? 1 : 0));
   const childAcc = new Map<number, Float64Array>();
   const childCnt = new Map<number, Int32Array>();
   const chainCodes = c.chain.codes;
+  const subCodes = c.subType.codes;
   const nChain = c.chain.dict.length;
   // Brick → territory weights
-  const terrW = query.level === 'brick' ? new Map<number, Map<number, number>>() : null;
+  const terrW = new Map<number, Map<number, number>>();
+  const brickCodes = c.brick.codes;
+  const terrCodes = c.territory.codes;
 
   const { qty, val, tx, periodIdx } = p;
   const lineCodes = c.line.codes;
   const ng = globalMasks.length;
   const np = productMasks.length;
+  const nl = levelAccs.length;
 
   rows: for (let i = 0; i < p.n; i++) {
     if (!txAllowed[tx[i]]) continue;
@@ -463,81 +600,86 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     const m = monthOfP[pk];
     monthAcc[m * 4 + off] += q;
     monthAcc[m * 4 + off + 1] += v;
-    const g = gcodes[i];
-    gAcc[g * 4 + off] += q;
-    gAcc[g * 4 + off + 1] += v;
-    gCnt[g]++;
-    if (expandable[g]) {
-      let ca = childAcc.get(g);
+    for (let j = 0; j < nl; j++) {
+      const la = levelAccs[j];
+      const g = la.col.codes[i];
+      la.acc[g * 4 + off] += q;
+      la.acc[g * 4 + off + 1] += v;
+      la.cnt[g]++;
+    }
+    const sg = subCodes[i];
+    if (expandable[sg]) {
+      let ca = childAcc.get(sg);
       if (!ca) {
         ca = new Float64Array(nChain * 4);
-        childAcc.set(g, ca);
-        childCnt.set(g, new Int32Array(nChain));
+        childAcc.set(sg, ca);
+        childCnt.set(sg, new Int32Array(nChain));
       }
       const ch = chainCodes[i];
       ca[ch * 4 + off] += q;
       ca[ch * 4 + off + 1] += v;
-      childCnt.get(g)![ch]++;
+      childCnt.get(sg)![ch]++;
     }
-    if (terrW) {
-      let tm = terrW.get(g);
-      if (!tm) terrW.set(g, (tm = new Map()));
-      const t = c.territory.codes[i];
-      tm.set(t, (tm.get(t) ?? 0) + Math.abs(v) + 1e-6);
-    }
+    const bg = brickCodes[i];
+    let tm = terrW.get(bg);
+    if (!tm) terrW.set(bg, (tm = new Map()));
+    const t = terrCodes[i];
+    tm.set(t, (tm.get(t) ?? 0) + Math.abs(v) + 1e-6);
   }
 
-  // Build rows
-  const field = LEVEL_FIELD[query.level];
-  const cinfo = query.level === 'customer' ? customerInfo(p) : null;
-  const rowsOut: GroupRow[] = [];
-  for (let g = 0; g < groupCol.dict.length; g++) {
-    if (!gCnt[g]) continue;
-    const value = groupCol.dict[g];
-    const row: GroupRow = {
-      id: `${field}:${value}`,
-      field,
-      value,
-      label: value || UNASSIGNED_LABEL,
-      sums: sumsAt(gAcc, g),
-      rowCount: gCnt[g],
-    };
-    if (expandable[g] && childAcc.has(g)) {
-      const ca = childAcc.get(g)!;
-      const cc = childCnt.get(g)!;
-      row.children = [];
-      for (let k = 0; k < nChain; k++) {
-        if (!cc[k]) continue;
-        const cv = c.chain.dict[k];
-        row.children.push({
-          id: `${row.id}|Chain:${cv}`,
-          field: 'Chain',
-          value: cv,
-          label: cv || UNASSIGNED_CHAIN_LABEL,
-          sums: sumsAt(ca, k),
-          rowCount: cc[k],
-          parentValue: value,
-        });
+  const levels = {} as Record<Level, GroupRow[]>;
+  for (const { level, col, acc, cnt } of levelAccs) {
+    const field = LEVEL_FIELD[level];
+    const rowsOut: GroupRow[] = [];
+    for (let g = 0; g < col.dict.length; g++) {
+      if (!cnt[g]) continue;
+      const value = col.dict[g];
+      const row: GroupRow = {
+        id: `${field}:${value}`,
+        field,
+        value,
+        label: value || UNASSIGNED_LABEL,
+        sums: sumsAt(acc, g),
+        rowCount: cnt[g],
+      };
+      if (level === 'subtype' && expandable[g] && childAcc.has(g)) {
+        const ca = childAcc.get(g)!;
+        const cc = childCnt.get(g)!;
+        row.children = [];
+        for (let k = 0; k < nChain; k++) {
+          if (!cc[k]) continue;
+          const cv = c.chain.dict[k];
+          row.children.push({
+            id: `${row.id}|Chain:${cv}`,
+            field: 'Chain',
+            value: cv,
+            label: cv || UNASSIGNED_CHAIN_LABEL,
+            sums: sumsAt(ca, k),
+            rowCount: cc[k],
+            parentValue: value,
+          });
+        }
       }
+      if (level === 'brick') {
+        const tm = terrW.get(g)!;
+        let best = -1;
+        let bw = -1;
+        for (const [t, w] of tm) if (w > bw) (best = t), (bw = w);
+        row.territory = c.territory.dict[best] || UNASSIGNED_LABEL;
+        row.territoryOthers = [...tm.keys()].filter((t) => t !== best).map((t) => c.territory.dict[t] || UNASSIGNED_LABEL).sort();
+      }
+      if (level === 'customer') {
+        const info = p.customerInfo.get(g);
+        row.customerId = info?.id ?? '';
+        row.label = info?.name || info?.id || UNASSIGNED_LABEL;
+        row.brick = info?.brick || UNASSIGNED_LABEL;
+        row.subType = info?.subType || UNASSIGNED_LABEL;
+        row.brickOthers = info?.brickOthers ?? [];
+        row.subTypeOthers = info?.subTypeOthers ?? [];
+      }
+      rowsOut.push(row);
     }
-    if (terrW) {
-      const tm = terrW.get(g)!;
-      let best = -1;
-      let bw = -1;
-      for (const [t, w] of tm) if (w > bw) (best = t), (bw = w);
-      row.territory = c.territory.dict[best] || UNASSIGNED_LABEL;
-      row.territoryOthers = [...tm.keys()].filter((t) => t !== best).map((t) => c.territory.dict[t] || UNASSIGNED_LABEL).sort();
-    }
-    if (cinfo) {
-      const info = cinfo.get(g);
-      row.customerId = value;
-      row.label = info?.name || value || UNASSIGNED_LABEL;
-      row.brick = info?.brick || UNASSIGNED_LABEL;
-      row.subType = info?.subType || UNASSIGNED_LABEL;
-      row.brickOthers = info?.brickOthers ?? [];
-      row.subTypeOthers = info?.subTypeOthers ?? [];
-    }
-    rowsOut.push(row);
+    levels[level] = rowsOut;
   }
 
   const lines: LineSummary[] = [];
@@ -554,7 +696,67 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
 
   const months: MonthPoint[] = period.chartMonths.map((m) => ({ month: m, label: MONTH_ABBR[m - 1], sums: sumsAt(monthAcc, m) }));
 
-  return { period, totals, months, rows: rowsOut, lines, linesTotal, matchedRows: matched };
+  return { period, totals, months, levels, lines, linesTotal, matchedRows: matched };
+}
+
+/**
+ * Item breakdown of one table row (a level value, or a Chain child of an expandable SubType).
+ * Uses the same filters as {@link analyze}; the returned item rows sum to the parent row.
+ */
+export function analyzeItems(ds: Dataset, query: AnalysisQuery, target: ItemTarget): GroupRow[] {
+  const ctx = buildContext(ds, query);
+  const { p, pflag, txAllowed, globalMasks, productMasks } = ctx;
+  const c = p.c;
+  const groupCol = c[LEVEL_COL[target.level]];
+  const gCode = groupCol.dict.indexOf(target.value);
+  if (gCode < 0) return [];
+  const chainCode = target.chain === undefined ? -1 : c.chain.dict.indexOf(target.chain);
+  if (target.chain !== undefined && chainCode < 0) return [];
+
+  const masks: Masks = [...globalMasks, ...productMasks];
+  const nm = masks.length;
+  const nItem = c.item.dict.length;
+  const acc = new Float64Array(nItem * 4);
+  const cnt = new Int32Array(nItem);
+  const { qty, val, tx, periodIdx } = p;
+  const gcodes = groupCol.codes;
+  const chainCodes = c.chain.codes;
+  const itemCodes = c.item.codes;
+
+  rows: for (let i = 0; i < p.n; i++) {
+    if (gcodes[i] !== gCode) continue;
+    if (chainCode >= 0 && chainCodes[i] !== chainCode) continue;
+    if (!txAllowed[tx[i]]) continue;
+    const f = pflag[periodIdx[i]];
+    if (!f) continue;
+    for (let j = 0; j < nm; j++) if (!masks[j][1][masks[j][0][i]]) continue rows;
+    const off = f === 2 ? 2 : 0;
+    const it = itemCodes[i];
+    acc[it * 4 + off] += qty[i];
+    acc[it * 4 + off + 1] += val[i];
+    cnt[it]++;
+  }
+
+  const parentId =
+    target.chain === undefined
+      ? `${LEVEL_FIELD[target.level]}:${target.value}`
+      : `${LEVEL_FIELD[target.level]}:${target.value}|Chain:${target.chain}`;
+  const out: GroupRow[] = [];
+  for (let k = 0; k < nItem; k++) {
+    if (!cnt[k]) continue;
+    const name = c.item.dict[k];
+    const b = p.itemBrand[k];
+    out.push({
+      id: `${parentId}|Item:${name}`,
+      field: 'Item',
+      value: name,
+      label: name || UNASSIGNED_LABEL,
+      sums: sumsAt(acc, k),
+      rowCount: cnt[k],
+      brand: b >= 0 ? c.brand.dict[b] : undefined,
+    });
+  }
+  return out;
 }
 
 /** Sum of a list of group rows (used for validation and totals). */

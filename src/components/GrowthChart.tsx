@@ -10,26 +10,25 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { GroupRow, LEVEL_LABEL } from '../lib/aggregate';
+import { LEVELS, LEVEL_LABEL, Level } from '../lib/aggregate';
 import { fmtCompact, fmtGrowth, fmtPct, fmtSigned } from '../lib/format';
 import { METRIC_LABEL, deriveRow } from '../lib/metrics';
 import { useDashboardStore } from '../store/useDashboardStore';
 
-interface GrowthChartProps {
-  rows: GroupRow[];
-}
+export const GrowthChart: React.FC = () => {
+  const { result, metric, chartLevel, setChartLevel, chartMode, setChartMode, theme } =
+    useDashboardStore();
 
-export const GrowthChart: React.FC<GrowthChartProps> = ({ rows }) => {
-  const { result, metric, level, chartMode, setChartMode, theme } = useDashboardStore();
+  const rows = result?.levels[chartLevel] ?? [];
 
   const chartData = useMemo(() => {
-    if (!result) return [];
+    if (!result || rows.length === 0) return [];
     const enriched = rows
       .map((r) => {
-        const d = deriveRow(r.sums, result.totals, metric);
+        const d = deriveRow(r.sums, metric);
         const val =
           chartMode === 'delta'
-            ? d.delta ?? 0
+            ? d.delta
             : d.growth.kind === 'pct'
               ? d.growth.value * 100
               : d.growth.kind === 'lost'
@@ -45,7 +44,8 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ rows }) => {
       })
       .filter((x) => Number.isFinite(x.val) && x.val !== 0);
 
-    return enriched.slice(0, 12);
+    enriched.sort((a, b) => b.val - a.val);
+    return enriched.slice(0, 10);
   }, [rows, result, metric, chartMode]);
 
   if (!result || chartData.length === 0) return null;
@@ -55,16 +55,32 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ rows }) => {
   const axisColor = isDark ? '#cbd5e1' : '#334155';
 
   return (
-    <div className="glass-panel flex flex-col rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div>
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-            Top {chartData.length} {LEVEL_LABEL[level]}s by{' '}
-            {chartMode === 'delta' ? `${METRIC_LABEL[metric]} Δ` : `${METRIC_LABEL[metric]} Growth %`}
-          </h2>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">
-            Ordered by current table sort
-          </p>
+    <div className="glass-panel flex flex-col rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              Top {chartData.length} by{' '}
+              {chartMode === 'delta' ? `${METRIC_LABEL[metric]} YoY Δ` : `${METRIC_LABEL[metric]} YoY Growth %`}
+            </h2>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">
+              {LEVEL_LABEL[chartLevel]} level ranked by {chartMode === 'delta' ? 'YoY Δ' : 'YoY Growth %'}
+            </p>
+          </div>
+
+          {/* Level selector */}
+          <select
+            value={chartLevel}
+            onChange={(e) => setChartLevel(e.target.value as Level)}
+            aria-label="Chart level selection"
+            className="rounded-lg border border-slate-200/80 bg-white/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:border-slate-700/80 dark:bg-slate-900/60 dark:text-slate-200 focus:outline-none"
+          >
+            {LEVELS.map((lvl) => (
+              <option key={lvl} value={lvl} className="bg-white dark:bg-slate-900">
+                {LEVEL_LABEL[lvl]}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div
@@ -82,7 +98,7 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ rows }) => {
                 : 'text-slate-600 dark:text-slate-300'
             }`}
           >
-            Δ Absolute
+            YoY Δ
           </button>
           <button
             type="button"
@@ -94,12 +110,12 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ rows }) => {
                 : 'text-slate-600 dark:text-slate-300'
             }`}
           >
-            Growth %
+            YoY %
           </button>
         </div>
       </div>
 
-      <div className="h-44 w-full">
+      <div className="h-40 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={chartData}
@@ -139,7 +155,7 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ rows }) => {
                 ];
               }}
             />
-            <Bar dataKey="val" radius={[0, 5, 5, 0]} maxBarSize={18}>
+            <Bar dataKey="val" radius={[0, 5, 5, 0]} maxBarSize={16}>
               {chartData.map((entry, idx) => (
                 <Cell
                   key={idx}

@@ -13,6 +13,7 @@ import {
   AnalysisQuery,
   LEVELS,
   analyze,
+  analyzeItems,
   buildMeta,
   brandOptions,
   itemOptions,
@@ -23,8 +24,6 @@ import {
   deriveRow,
   growth,
   metricCells,
-  ppg,
-  ppgDecomposition,
 } from './metrics';
 import { fmtGrowth } from './format';
 import { defaultSelection } from './periods';
@@ -39,15 +38,16 @@ const baseQuery = (overrides: Partial<AnalysisQuery> = {}): AnalysisQuery => ({
   items: [],
   mainTypes: [],
   drill: [],
-  level: 'subtype',
   ...overrides,
 });
 
-describe('Acceptance tests (agent_prompt.v2.md)', () => {
-  it('1. Sum of rows at every level equals the grand total, for every metric (Units, Value, PPG = ΣV/ΣQ)', () => {
+describe('Acceptance tests (Sales Growth Analyzer)', () => {
+  it('1. Sum of rows at every level equals the grand total, for every metric (Units, Value)', () => {
+    const res = analyze(sampleDs, baseQuery());
     for (const level of LEVELS) {
-      const res = analyze(sampleDs, baseQuery({ level }));
-      const summed = sumRows(res.rows);
+      const rows = res.levels[level];
+      expect(rows.length).toBeGreaterThan(0);
+      const summed = sumRows(rows);
       expect(summed.pyQ).toBeCloseTo(res.totals.pyQ, 6);
       expect(summed.pyV).toBeCloseTo(res.totals.pyV, 4);
       expect(summed.cyQ).toBeCloseTo(res.totals.cyQ, 6);
@@ -56,17 +56,18 @@ describe('Acceptance tests (agent_prompt.v2.md)', () => {
       for (const m of METRICS) {
         const totCells = metricCells(res.totals, m);
         const sumCells = metricCells(summed, m);
-        expect(sumCells.py).toBeCloseTo(totCells.py!, 6);
-        expect(sumCells.cy).toBeCloseTo(totCells.cy!, 6);
-        expect(sumCells.delta).toBeCloseTo(totCells.delta!, 6);
+        expect(sumCells.py).toBeCloseTo(totCells.py, 6);
+        expect(sumCells.cy).toBeCloseTo(totCells.cy, 6);
+        expect(sumCells.delta).toBeCloseTo(totCells.delta, 6);
       }
     }
   });
 
   it('2. Children of each expandable SubType (Chain, Private) sum to the parent row, including unassigned chain', () => {
-    const res = analyze(sampleDs, baseQuery({ level: 'subtype' }));
+    const res = analyze(sampleDs, baseQuery());
+    const subtypeRows = res.levels.subtype;
     for (const expSub of EXPANDABLE_SUBTYPES) {
-      const parent = res.rows.find((r) => r.value === expSub);
+      const parent = subtypeRows.find((r) => r.value === expSub);
       expect(parent, `Expected SubType=${expSub} in sample fixture`).toBeDefined();
       expect(parent!.children && parent!.children.length > 0).toBe(true);
       const childSum = sumRows(parent!.children!);
@@ -75,31 +76,44 @@ describe('Acceptance tests (agent_prompt.v2.md)', () => {
       expect(childSum.cyQ).toBeCloseTo(parent!.sums.cyQ, 6);
       expect(childSum.cyV).toBeCloseTo(parent!.sums.cyV, 4);
     }
-    const priv = res.rows.find((r) => r.value === 'Private')!;
+    const priv = subtypeRows.find((r) => r.value === 'Private')!;
     const unassignedChild = priv.children!.find((c) => c.label === UNASSIGNED_CHAIN_LABEL);
     expect(unassignedChild).toBeDefined();
 
     // Ezzaby is NOT expandable per Q3 decision
-    const ezzaby = res.rows.find((r) => r.value === 'Ezzaby');
+    const ezzaby = subtypeRows.find((r) => r.value === 'Ezzaby');
     expect(ezzaby?.children).toBeUndefined();
   });
 
-  it('3. PPG at any aggregation equals total value / total units, never an average of row PPGs', () => {
-    const res = analyze(sampleDs, baseQuery({ level: 'subtype' }));
-    const totPpg = metricCells(res.totals, 'ppg');
-    expect(totPpg.py).toBeCloseTo(res.totals.pyV / res.totals.pyQ, 8);
-    expect(totPpg.cy).toBeCloseTo(res.totals.cyV / res.totals.cyQ, 8);
+  it('3. Per-row Item drilldown (analyzeItems) returns items summing to the parent entity for any level and chain child', () => {
+    const q = baseQuery();
+    const res = analyze(sampleDs, q);
+    for (const level of LEVELS) {
+      const top = res.levels[level][0];
+      expect(top).toBeDefined();
+      const items = analyzeItems(sampleDs, q, { level, value: top.value });
+      expect(items.length).toBeGreaterThan(0);
+      const itemSums = sumRows(items);
+      expect(itemSums.pyQ).toBeCloseTo(top.sums.pyQ, 6);
+      expect(itemSums.pyV).toBeCloseTo(top.sums.pyV, 4);
+      expect(itemSums.cyQ).toBeCloseTo(top.sums.cyQ, 6);
+      expect(itemSums.cyV).toBeCloseTo(top.sums.cyV, 4);
+    }
 
-    const avgOfRowPpgs =
-      res.rows.reduce((acc, r) => acc + (ppg(r.sums.cyV, r.sums.cyQ) ?? 0), 0) / res.rows.length;
-    expect(Math.abs(totPpg.cy! - avgOfRowPpgs)).toBeGreaterThan(0.01);
-
-    // PPG mode price + mix decomposition adds up to total PPG delta
-    const dec = ppgDecomposition(
-      res.rows.map((r) => r.sums),
-      res.totals,
-    );
-    expect(dec.priceEffect + (dec.mixEffect ?? 0)).toBeCloseTo(dec.totalDelta!, 8);
+    // Chain child of an expandable SubType
+    const chainSub = res.levels.subtype.find((r) => r.value === 'Chain')!;
+    const chainChild = chainSub.children![0];
+    const childItems = analyzeItems(sampleDs, q, {
+      level: 'subtype',
+      value: 'Chain',
+      chain: chainChild.value,
+    });
+    expect(childItems.length).toBeGreaterThan(0);
+    const childItemSums = sumRows(childItems);
+    expect(childItemSums.pyQ).toBeCloseTo(chainChild.sums.pyQ, 6);
+    expect(childItemSums.pyV).toBeCloseTo(chainChild.sums.pyV, 4);
+    expect(childItemSums.cyQ).toBeCloseTo(chainChild.sums.cyQ, 6);
+    expect(childItemSums.cyV).toBeCloseTo(chainChild.sums.cyV, 4);
   });
 
   it('4. Like-for-like ON with partial CY (only 202607): PY includes only 202507 and CY only 202607', () => {
@@ -132,25 +146,24 @@ describe('Acceptance tests (agent_prompt.v2.md)', () => {
   it('5. Growth edge cases: PY=0 -> "New", CY=0 with PY>0 -> -100.0% ("lost"), both 0 -> "–"', () => {
     const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
     const edgeMeta = buildMeta(edgeDs);
-    const res = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability), level: 'customer' }));
+    const res = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability) }));
 
-    const cNew = res.rows.find((r) => r.value === 'C-200')!;
-    const dNew = deriveRow(cNew.sums, res.totals, 'value');
+    const cNew = res.levels.customer.find((r) => r.customerId === 'C-200')!;
+    const dNew = deriveRow(cNew.sums, 'value');
     expect(dNew.growth.kind).toBe('new');
     expect(fmtGrowth(dNew.growth)).toBe('New');
     expect(dNew.status).toBe('new');
 
-    const cLost = res.rows.find((r) => r.value === 'C-300')!;
-    const dLost = deriveRow(cLost.sums, res.totals, 'value');
+    const cLost = res.levels.customer.find((r) => r.customerId === 'C-300')!;
+    const dLost = deriveRow(cLost.sums, 'value');
     expect(dLost.growth.kind).toBe('lost');
     expect(fmtGrowth(dLost.growth)).toBe('−100.0%');
     expect(dLost.status).toBe('lost');
 
-    const cZero = res.rows.find((r) => r.value === 'C-400')!;
-    const dZero = deriveRow(cZero.sums, res.totals, 'value');
+    const cZero = res.levels.customer.find((r) => r.customerId === 'C-400')!;
+    const dZero = deriveRow(cZero.sums, 'value');
     expect(dZero.growth.kind).toBe('none');
     expect(fmtGrowth(dZero.growth)).toBe('–');
-    expect(metricCells(cZero.sums, 'ppg').py).toBeNull();
 
     // Direct unit checks
     expect(growth(0, 150)).toEqual({ kind: 'new' });
@@ -166,23 +179,23 @@ describe('Acceptance tests (agent_prompt.v2.md)', () => {
     const itemsInBrand = itemOptions(sampleMeta, targetLine, [chosenBrand]);
     expect(itemsInBrand.length).toBeGreaterThan(0);
 
-    const baseline = analyze(sampleDs, baseQuery({ level: 'territory' }));
-    const byLine = analyze(sampleDs, baseQuery({ line: targetLine, level: 'territory' }));
+    const baseline = analyze(sampleDs, baseQuery());
+    const byLine = analyze(sampleDs, baseQuery({ line: targetLine }));
     expect(byLine.totals.cyV).toBeLessThan(baseline.totals.cyV);
 
+    const r = analyze(
+      sampleDs,
+      baseQuery({ line: targetLine, brands: [chosenBrand] }),
+    );
     for (const lvl of LEVELS) {
-      const r = analyze(
-        sampleDs,
-        baseQuery({ line: targetLine, brands: [chosenBrand], level: lvl }),
-      );
-      const s = sumRows(r.rows);
+      const s = sumRows(r.levels[lvl]);
       expect(s.cyV).toBeCloseTo(r.totals.cyV, 5);
       expect(s.pyV).toBeCloseTo(r.totals.pyV, 5);
       expect(s.cyQ).toBeCloseTo(r.totals.cyQ, 5);
       expect(s.pyQ).toBeCloseTo(r.totals.pyQ, 5);
-      // Sidebar badges ignore Brand/Item filters
-      expect(r.linesTotal.cyV).toBeCloseTo(baseline.linesTotal.cyV, 5);
     }
+    // Sidebar badges ignore Brand/Item filters
+    expect(r.linesTotal.cyV).toBeCloseTo(baseline.linesTotal.cyV, 5);
   });
 
   it('7. Bonus and Return Bonus rows never affect any metric', () => {
@@ -193,21 +206,39 @@ describe('Acceptance tests (agent_prompt.v2.md)', () => {
       ),
     );
     const meta1 = buildMeta(edgeDs);
-    const r1 = analyze(edgeDs, baseQuery({ period: defaultSelection(meta1.availability), level: 'subtype' }));
-    const r2 = analyze(withoutBonus, baseQuery({ period: defaultSelection(meta1.availability), level: 'subtype' }));
+    const r1 = analyze(edgeDs, baseQuery({ period: defaultSelection(meta1.availability) }));
+    const r2 = analyze(withoutBonus, baseQuery({ period: defaultSelection(meta1.availability) }));
     expect(r1.totals).toEqual(r2.totals);
   });
 
-  it('8. Customer-level Brick/SubType comes from the most recent month (CY first) and +N lists prior values', () => {
+  it('8. Customer identity: same CustomerID + CustomerName considered one customer; CY Brick & Territory persist across all years', () => {
     const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
     const edgeMeta = buildMeta(edgeDs);
-    const res = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability), level: 'customer' }));
-    const c100 = res.rows.find((r) => r.value === 'C-100')!;
-    // In 202507..09 C-100 was Brick="Cairo East 1", SubType="Chain"; in 202607 it moved to "Cairo East 2", "Private"
+    const q = baseQuery({ period: defaultSelection(edgeMeta.availability) });
+    const res = analyze(edgeDs, q);
+
+    // Customer C-100 ("صيدلية الشفاء") moved from Brick="Cairo East 1" (PY) to Brick="Cairo East 2" (CY).
+    // Even though the Brick changed, it is ONE customer row with both PY (100 units, 5000 value) and CY (150 units, 9000 value).
+    const c100Rows = res.levels.customer.filter((r) => r.customerId === 'C-100');
+    expect(c100Rows.length).toBe(1);
+    const c100 = c100Rows[0];
+    expect(c100.label).toBe('صيدلية الشفاء');
     expect(c100.brick).toBe('Cairo East 2');
     expect(c100.brickOthers).toEqual(['Cairo East 1']);
     expect(c100.subType).toBe('Private');
     expect(c100.subTypeOthers).toEqual(['Chain']);
+    expect(c100.sums).toEqual({ pyQ: 100, pyV: 5000, cyQ: 150, cyV: 9000 });
+
+    // In the Brick table, C-100's PY sales (100 units, 5000 value) are mapped to its updated true CY brick "Cairo East 2",
+    // and the old PY brick "Cairo East 1" has no remaining sales.
+    const brickCe1 = res.levels.brick.find((r) => r.value === 'Cairo East 1');
+    expect(brickCe1).toBeUndefined();
+    const brickCe2 = res.levels.brick.find((r) => r.value === 'Cairo East 2')!;
+    expect(brickCe2.sums).toEqual({ pyQ: 100, pyV: 5000, cyQ: 150, cyV: 9000 });
+
+    // Item drill-down on the CY brick includes both PY and CY sales of that customer
+    const brickItems = analyzeItems(edgeDs, q, { level: 'brick', value: 'Cairo East 2' });
+    expect(sumRows(brickItems)).toEqual({ pyQ: 100, pyV: 5000, cyQ: 150, cyV: 9000 });
   });
 
   it('9. Columnar converter round-trip preserves row counts and all totals', () => {
@@ -215,15 +246,15 @@ describe('Acceptance tests (agent_prompt.v2.md)', () => {
     const decoded = decodeDataset(JSON.parse(json));
     validateDataset(decoded);
     expect(decoded.rowCount).toBe(sampleDs.rowCount);
-    const a = analyze(sampleDs, baseQuery({ level: 'brick' }));
-    const b = analyze(decoded, baseQuery({ level: 'brick' }));
+    const a = analyze(sampleDs, baseQuery());
+    const b = analyze(decoded, baseQuery());
     expect(b.totals.pyQ).toBeCloseTo(a.totals.pyQ, 6);
     expect(b.totals.pyV).toBeCloseTo(a.totals.pyV, 4);
     expect(b.totals.cyQ).toBeCloseTo(a.totals.cyQ, 6);
     expect(b.totals.cyV).toBeCloseTo(a.totals.cyV, 4);
   });
 
-  it('Validation throws descriptive errors for missing columns and bad Date formats', () => {
+  it('10. Validation throws descriptive errors for missing columns and bad Date formats', () => {
     const missingDs = datasetFromRows([{ Date: 202607, Line: 'Rota 1' }]);
     expect(() => validateDataset(missingDs)).toThrowError(DataError);
     try {

@@ -24,15 +24,9 @@ export function fmtValue(x: number | null | undefined, withCurrency = true): str
   return withCurrency ? `EGP ${s}` : s;
 }
 
-export function fmtPpg(x: number | null | undefined): string {
-  if (x === null || x === undefined || !Number.isFinite(x)) return DASH;
-  return nf2.format(clean(x));
-}
-
 export function fmtMetric(x: number | null | undefined, m: Metric, withCurrency = true): string {
   if (m === 'units') return fmtUnits(x);
-  if (m === 'value') return fmtValue(x, withCurrency);
-  return fmtPpg(x);
+  return fmtValue(x, withCurrency);
 }
 
 export function fmtSigned(x: number | null | undefined, m: Metric, withCurrency = true): string {
@@ -77,5 +71,5 @@ export function fmtGrowth(g: Growth): string {
 }
 
 export function metricUnitLabel(m: Metric): string {
-  return m === 'units' ? 'Units' : m === 'value' ? 'Value (EGP)' : 'PPG (EGP/unit)';
+  return m === 'units' ? 'Units' : 'Value (EGP)';
 }

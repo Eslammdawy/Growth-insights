@@ -19,42 +19,42 @@ export const KpiCards: React.FC = () => {
     <section
       aria-label="Key Performance Indicators"
       aria-live="polite"
-      className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
+      className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4"
     >
       {/* PY Total */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-4">
+      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
         <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
           <span>Prior Period ({result.period.pyLabel})</span>
           <span className="rounded-md bg-slate-200/70 dark:bg-slate-800 px-1.5 py-0.5 text-[10px]">
             {unitLabel}
           </span>
         </div>
-        <div className="mt-2 text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums">
+        <div className="mt-1.5 text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums">
           {fmtMetric(cells.py, metric)}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
-          Units: {fmtMetric(result.totals.pyQ, 'units')} · PPG: {fmtMetric(result.totals.pyQ ? result.totals.pyV / result.totals.pyQ : null, 'ppg')}
+        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
+          Units: {fmtMetric(result.totals.pyQ, 'units')} · Value: {fmtMetric(result.totals.pyV, 'value')}
         </div>
       </div>
 
       {/* CY Total */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-4">
+      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
         <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
           <span>Current Period ({result.period.cyLabel})</span>
           <span className="rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-300">
             {unitLabel}
           </span>
         </div>
-        <div className="mt-2 text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums">
+        <div className="mt-1.5 text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white tabular-nums">
           {fmtMetric(cells.cy, metric)}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
-          Units: {fmtMetric(result.totals.cyQ, 'units')} · PPG: {fmtMetric(result.totals.cyQ ? result.totals.cyV / result.totals.cyQ : null, 'ppg')}
+        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
+          Units: {fmtMetric(result.totals.cyQ, 'units')} · Value: {fmtMetric(result.totals.cyV, 'value')}
         </div>
       </div>
 
-      {/* Growth % */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-4">
+      {/* YoY Growth % */}
+      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
         <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
           <span>YoY Growth %</span>
           <span
@@ -79,7 +79,7 @@ export const KpiCards: React.FC = () => {
           </span>
         </div>
         <div
-          className={`mt-2 flex items-baseline gap-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${
+          className={`mt-1.5 flex items-baseline gap-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${
             isUp
               ? 'text-emerald-600 dark:text-emerald-400'
               : isDown
@@ -90,21 +90,21 @@ export const KpiCards: React.FC = () => {
           <span>{isUp && cells.growth.kind === 'pct' ? '▲' : isDown ? '▼' : ''}</span>
           <span>{gText}</span>
         </div>
-        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-          Formula: (CY − PY) / |PY|
+        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
+          (CY − PY) / |PY|
         </div>
       </div>
 
-      {/* Delta Absolute */}
-      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-4">
+      {/* YoY Growth (Δ) */}
+      <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 p-3.5">
         <div className="flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
-          <span>Absolute Change (Δ)</span>
+          <span>YoY Growth (Δ)</span>
           <span className="text-[11px] tabular-nums text-slate-400">
             {result.matchedRows.toLocaleString('en-US')} tx rows
           </span>
         </div>
         <div
-          className={`mt-2 text-2xl font-extrabold tracking-tight tabular-nums ${
+          className={`mt-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${
             isUp
               ? 'text-emerald-600 dark:text-emerald-400'
               : isDown
@@ -114,8 +114,8 @@ export const KpiCards: React.FC = () => {
         >
           {fmtSigned(cells.delta, metric)}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
-          Δ Value: {fmtSigned(result.totals.cyV - result.totals.pyV, 'value')}
+        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
+          CY − PY ({unitLabel})
         </div>
       </div>
     </section>

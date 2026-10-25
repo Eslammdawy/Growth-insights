@@ -168,9 +168,6 @@ export const Filters: React.FC = () => {
     setBrandsForCurrentLine,
     setItemsForCurrentLine,
     drill,
-    statusFilter,
-    topN,
-    search,
     resetFilters,
   } = useDashboardStore();
 
@@ -191,10 +188,7 @@ export const Filters: React.FC = () => {
     currentLineFilter.items.length +
     mainTypes.length +
     (txTypes.length !== TX_TYPES.length ? 1 : 0) +
-    drill.length +
-    (statusFilter !== 'all' ? 1 : 0) +
-    (topN !== null ? 1 : 0) +
-    (search.trim() !== '' ? 1 : 0);
+    drill.length;
 
   const toggleTxType = (t: TxType) => {
     if (txTypes.includes(t)) {
