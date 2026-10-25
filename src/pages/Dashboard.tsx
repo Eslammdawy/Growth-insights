@@ -1,15 +1,35 @@
-import React, { useEffect } from 'react';
+import React, { Suspense, useEffect, useSyncExternalStore } from 'react';
 import { AlertCircle, Database, Loader2 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { DrillChips } from '../components/DrillChips';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Filters } from '../components/Filters';
-import { GrowthChart } from '../components/GrowthChart';
 import { KpiCards } from '../components/KpiCards';
 import { LevelTable } from '../components/LevelTable';
-import { MonthChart } from '../components/MonthChart';
 import { Sidebar } from '../components/Sidebar';
 import { TopBar } from '../components/TopBar';
-import { LEVELS } from '../lib/aggregate';
+import { LEVEL_LABEL, LEVELS } from '../lib/aggregate';
+import { getHashSnapshot, subscribeHash } from '../lib/hashState';
 import { useDashboardStore } from '../store/useDashboardStore';
+
+const MonthChart = React.lazy(() =>
+  import('../components/MonthChart').then((m) => ({ default: m.MonthChart }))
+);
+const GrowthChart = React.lazy(() =>
+  import('../components/GrowthChart').then((m) => ({ default: m.GrowthChart }))
+);
+
+function ChartSkeleton() {
+  return (
+    <div className="glass-panel flex h-[280px] w-full flex-col justify-between rounded-2xl border border-slate-200/70 p-4 dark:border-slate-800/80">
+      <div className="animate-pulse space-y-2">
+        <div className="h-3.5 w-36 rounded bg-slate-200 dark:bg-slate-800" />
+        <div className="h-2.5 w-24 rounded bg-slate-200/60 dark:bg-slate-800/60" />
+      </div>
+      <div className="h-44 w-full animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800/50" />
+    </div>
+  );
+}
 
 export const Dashboard: React.FC = () => {
   const {
@@ -22,7 +42,19 @@ export const Dashboard: React.FC = () => {
     theme,
     syncFromHash,
     analyzing,
-  } = useDashboardStore();
+  } = useDashboardStore(
+    useShallow((s) => ({
+      meta: s.meta,
+      result: s.result,
+      loading: s.loading,
+      progress: s.progress,
+      error: s.error,
+      loadSampleData: s.loadSampleData,
+      theme: s.theme,
+      syncFromHash: s.syncFromHash,
+      analyzing: s.analyzing,
+    }))
+  );
 
   // Sync theme class on <html>
   useEffect(() => {
@@ -31,12 +63,13 @@ export const Dashboard: React.FC = () => {
     else root.classList.remove('dark');
   }, [theme]);
 
-  // Listen to browser hash navigation
+  // Subscribe to URL hash navigation via useSyncExternalStore
+  const hash = useSyncExternalStore(subscribeHash, getHashSnapshot, () => '');
   useEffect(() => {
-    const onHash = () => syncFromHash();
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, [syncFromHash]);
+    if (meta) {
+      syncFromHash(hash);
+    }
+  }, [hash, meta, syncFromHash]);
 
   // Auto-load dataset on first mount
   useEffect(() => {
@@ -45,7 +78,7 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="relative flex min-h-screen bg-gradient-to-br from-slate-100 via-sky-50/40 to-indigo-100/50 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/60 dark:text-slate-100">
-      {/* Left Sidebar */}
+      {/* Left Sidebar / Mobile Drawer */}
       <Sidebar />
 
       {/* Main Content Area */}
@@ -119,14 +152,24 @@ export const Dashboard: React.FC = () => {
 
               {/* Charts Row: Month-by-Month Trend + Top N YoY Growth Chart */}
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <MonthChart />
-                <GrowthChart />
+                <ErrorBoundary title="Monthly Trend Chart">
+                  <Suspense fallback={<ChartSkeleton />}>
+                    <MonthChart />
+                  </Suspense>
+                </ErrorBoundary>
+                <ErrorBoundary title="YoY Growth Chart">
+                  <Suspense fallback={<ChartSkeleton />}>
+                    <GrowthChart />
+                  </Suspense>
+                </ErrorBoundary>
               </div>
 
               {/* Stacked Level Tables: SubType, Distributor, Territory, Brick, Customer */}
               <div className={`space-y-4 pt-1 transition-opacity duration-200 ${analyzing ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
                 {LEVELS.map((lvl) => (
-                  <LevelTable key={lvl} level={lvl} />
+                  <ErrorBoundary key={lvl} title={`${LEVEL_LABEL[lvl]} Level Table`}>
+                    <LevelTable level={lvl} />
+                  </ErrorBoundary>
                 ))}
               </div>
             </>

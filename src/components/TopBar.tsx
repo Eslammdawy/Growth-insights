@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useTransition } from 'react';
 import {
   Calendar,
   Database,
@@ -6,12 +6,15 @@ import {
   Sun,
   CheckCircle2,
   AlertTriangle,
+  Menu,
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { METRICS, METRIC_LABEL } from '../lib/metrics';
-import { MONTH_ABBR, quarterMonths } from '../lib/periods';
+import { MONTH_ABBR, quarterMonths, PeriodSelection } from '../lib/periods';
 import { useDashboardStore } from '../store/useDashboardStore';
 
 export const TopBar: React.FC = () => {
+  const [, startTransition] = useTransition();
   const {
     meta,
     sourceName,
@@ -23,7 +26,28 @@ export const TopBar: React.FC = () => {
     theme,
     toggleTheme,
     analyzing,
-  } = useDashboardStore();
+    setMobileDrawerOpen,
+  } = useDashboardStore(
+    useShallow((s) => ({
+      meta: s.meta,
+      sourceName: s.sourceName,
+      result: s.result,
+      metric: s.metric,
+      setMetric: s.setMetric,
+      period: s.period,
+      setPeriod: s.setPeriod,
+      theme: s.theme,
+      toggleTheme: s.toggleTheme,
+      analyzing: s.analyzing,
+      setMobileDrawerOpen: s.setMobileDrawerOpen,
+    }))
+  );
+
+  const updatePeriod = (patch: Partial<PeriodSelection>) => {
+    startTransition(() => {
+      setPeriod(patch);
+    });
+  };
 
   const years = meta?.availability.years ?? [2025, 2026];
   const qMonths = quarterMonths(period.quarter);
@@ -33,6 +57,14 @@ export const TopBar: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Brand & Period Banner */}
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileDrawerOpen(true)}
+            aria-label="Open sales lines navigation"
+            className="rounded-xl border border-slate-200/80 bg-white/70 p-2 text-slate-700 hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800 md:hidden focus:outline-none focus:ring-2 focus:ring-sky-500"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-base font-extrabold tracking-tight text-slate-900 dark:text-white">
@@ -101,7 +133,7 @@ export const TopBar: React.FC = () => {
               value={period.cyYear}
               onChange={(e) => {
                 const cy = Number(e.target.value);
-                setPeriod({ cyYear: cy, pyYear: cy - 1 });
+                updatePeriod({ cyYear: cy, pyYear: cy - 1 });
               }}
               className="bg-transparent font-semibold text-slate-800 dark:text-slate-100 focus:outline-none"
               title="Current Year (CY)"
@@ -119,7 +151,7 @@ export const TopBar: React.FC = () => {
             <select
               id="py-year-select"
               value={period.pyYear}
-              onChange={(e) => setPeriod({ pyYear: Number(e.target.value) })}
+              onChange={(e) => updatePeriod({ pyYear: Number(e.target.value) })}
               className="bg-transparent font-semibold text-slate-800 dark:text-slate-100 focus:outline-none"
               title="Prior Year (PY)"
             >
@@ -138,7 +170,7 @@ export const TopBar: React.FC = () => {
             <select
               id="quarter-select"
               value={period.quarter}
-              onChange={(e) => setPeriod({ quarter: Number(e.target.value), month: null })}
+              onChange={(e) => updatePeriod({ quarter: Number(e.target.value), month: null })}
               className="bg-transparent font-semibold text-slate-800 dark:text-slate-100 focus:outline-none"
             >
               {[1, 2, 3, 4].map((q) => (
@@ -155,7 +187,7 @@ export const TopBar: React.FC = () => {
               id="month-select"
               value={period.month ?? ''}
               onChange={(e) =>
-                setPeriod({ month: e.target.value === '' ? null : Number(e.target.value) })
+                updatePeriod({ month: e.target.value === '' ? null : Number(e.target.value) })
               }
               className="bg-transparent text-slate-600 dark:text-slate-300 focus:outline-none"
               title="All months in quarter or single month"
@@ -179,7 +211,7 @@ export const TopBar: React.FC = () => {
             <input
               type="checkbox"
               checked={period.likeForLike}
-              onChange={(e) => setPeriod({ likeForLike: e.target.checked })}
+              onChange={(e) => updatePeriod({ likeForLike: e.target.checked })}
               className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
             />
             <span>Like-for-like months</span>

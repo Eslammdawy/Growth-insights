@@ -21,6 +21,7 @@ export type WorkerRequest =
   | { id: number; type: 'load-url'; url: string }
   | { id: number; type: 'load-file'; file: File }
   | { id: number; type: 'analyze'; query: AnalysisQuery }
+  | { id: number; type: 'cancel'; targetId: number }
   | { id: number; type: 'items'; query: AnalysisQuery; target: ItemTarget };
 
 export type WorkerResponse =
@@ -28,9 +29,11 @@ export type WorkerResponse =
   | { id: number; type: 'loaded'; meta: DatasetMeta; sourceName: string }
   | { id: number; type: 'analyzed'; result: AnalysisResult }
   | { id: number; type: 'items'; rows: GroupRow[] }
+  | { id: number; type: 'cancelled' }
   | { id: number; type: 'error'; message: string; kind?: string; details?: string[] };
 
 let currentDataset: Dataset | null = null;
+const cancelledIds = new Set<number>();
 
 async function decompressBytes(buf: ArrayBuffer, onProgress?: (p: ParseProgress) => void): Promise<string> {
   const bytes = new Uint8Array(buf);
@@ -82,6 +85,18 @@ async function loadJsonGzFromBuffer(
 self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data;
   const send = (res: WorkerResponse) => self.postMessage(res);
+
+  if (msg.type === 'cancel') {
+    cancelledIds.add(msg.targetId);
+    return;
+  }
+
+  if (cancelledIds.has(msg.id)) {
+    cancelledIds.delete(msg.id);
+    send({ id: msg.id, type: 'cancelled' });
+    return;
+  }
+
   try {
     if (msg.type === 'load-url') {
       send({ id: msg.id, type: 'progress', progress: { phase: 'directory', ratio: 0.05, rows: 0 } });
@@ -132,10 +147,20 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       const meta = buildMeta(ds);
       send({ id: msg.id, type: 'loaded', meta, sourceName: file.name });
     } else if (msg.type === 'analyze') {
+      if (cancelledIds.has(msg.id)) {
+        cancelledIds.delete(msg.id);
+        send({ id: msg.id, type: 'cancelled' });
+        return;
+      }
       if (!currentDataset) {
         throw new DataError('empty', 'No dataset loaded yet.');
       }
       const result = analyze(currentDataset, msg.query);
+      if (cancelledIds.has(msg.id)) {
+        cancelledIds.delete(msg.id);
+        send({ id: msg.id, type: 'cancelled' });
+        return;
+      }
       send({ id: msg.id, type: 'analyzed', result });
     } else if (msg.type === 'items') {
       if (!currentDataset) {

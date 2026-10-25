@@ -27,6 +27,7 @@ import {
 } from './metrics';
 import { fmtGrowth } from './format';
 import { defaultSelection } from './periods';
+import { parseHashParams, serializeHashState, validateHashAgainstMeta } from './hashState';
 
 const sampleDs = datasetFromRows(sampleRows as Record<string, unknown>[]);
 const sampleMeta = buildMeta(sampleDs);
@@ -275,5 +276,53 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     const badDateRows = [{ ...(edgeRows[0] as Record<string, unknown>), Date: 202613 }];
     const badDateDs = datasetFromRows(badDateRows);
     expect(() => validateDataset(badDateDs)).toThrowError(/YYYYMM/);
+  });
+
+  it('12. URL hash state round-trips correctly and validates against dataset meta', () => {
+    const original = {
+      metric: 'units' as const,
+      line: sampleMeta.lines[0] ?? 'Rota 1',
+      period: { cyYear: 2026, pyYear: 2025, quarter: 3, month: 8, likeForLike: false },
+      mainTypes: [sampleMeta.mainTypes[0] ?? 'Hospital'],
+      txTypes: ['Sales'] as ('Sales' | 'Return Sales')[],
+      brands: brandOptions(sampleMeta, sampleMeta.lines[0]).slice(0, 1),
+      items: itemOptions(sampleMeta, sampleMeta.lines[0], []).slice(0, 1),
+      drill: [{ field: 'SubType' as const, value: 'Chain', label: 'Chain' }],
+    };
+
+    const hash = serializeHashState(original);
+    expect(hash.startsWith('#')).toBe(true);
+
+    const parsed = parseHashParams(hash);
+    expect(parsed.metric).toBe('units');
+    expect(parsed.line).toBe(original.line);
+    expect(parsed.cyYear).toBe(2026);
+    expect(parsed.quarter).toBe(3);
+    expect(parsed.month).toBe(8);
+    expect(parsed.likeForLike).toBe(false);
+    expect(parsed.txTypes).toEqual(['Sales']);
+    expect(parsed.drill).toEqual([{ field: 'SubType', value: 'Chain', label: 'Chain' }]);
+
+    const defPeriod = defaultSelection(sampleMeta.availability);
+    const validated = validateHashAgainstMeta(parsed, sampleMeta, defPeriod);
+    expect(validated.metric).toBe('units');
+    expect(validated.line).toBe(original.line);
+    expect(validated.period.cyYear).toBe(2026);
+    expect(validated.period.quarter).toBe(3);
+    expect(validated.period.month).toBe(8);
+    expect(validated.period.likeForLike).toBe(false);
+    expect(validated.txTypes).toEqual(['Sales']);
+    expect(validated.drill).toEqual([{ field: 'SubType', value: 'Chain', label: 'Chain' }]);
+
+    // Invalid parameters fall back to safe defaults
+    const invalidParsed = parseHashParams('#line=NonExistentLine&year=1990&q=9&m=99&metric=invalid&txTypes=Unknown&drill=malformed{json');
+    const safeValidated = validateHashAgainstMeta(invalidParsed, sampleMeta, defPeriod);
+    expect(safeValidated.line).toBeNull();
+    expect(safeValidated.metric).toBeUndefined();
+    expect(safeValidated.period.cyYear).toBe(defPeriod.cyYear);
+    expect(safeValidated.period.quarter).toBe(defPeriod.quarter);
+    expect(safeValidated.period.month).toBeNull();
+    expect(safeValidated.txTypes).toEqual(['Sales', 'Return Sales']);
+    expect(safeValidated.drill).toEqual([]);
   });
 });

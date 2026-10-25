@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDown,
@@ -15,9 +15,10 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { DrillChip, GroupRow, ItemTarget, LEVEL_LABEL, Level } from '../lib/aggregate';
 import { fmtGrowth, fmtMetric, fmtSigned } from '../lib/format';
-import { DerivedRow, deriveRow } from '../lib/metrics';
+import { DerivedRow, Metric, deriveRow } from '../lib/metrics';
 import { StatusFilter, useDashboardStore } from '../store/useDashboardStore';
 
 type SortId = 'label' | 'py' | 'cy' | 'delta' | 'growth';
@@ -63,13 +64,13 @@ function sortValue(r: { row: GroupRow; d: DerivedRow }, id: SortId): number | st
     case 'label':
       return r.row.label;
     case 'py':
-      return r.d.py;
+      return r.d.py ?? -Infinity;
     case 'cy':
-      return r.d.cy;
-    case 'growth':
-      return Number.isNaN(r.d.growthNum) ? -Infinity : r.d.growthNum;
-    default:
+      return r.d.cy ?? -Infinity;
+    case 'delta':
       return r.d.delta;
+    case 'growth':
+      return r.d.growth.kind === 'new' ? Infinity : r.d.growth.kind === 'none' ? -Infinity : r.d.growth.value;
   }
 }
 
@@ -83,22 +84,244 @@ function sortList<T extends { row: GroupRow; d: DerivedRow }>(list: T[], id: Sor
   });
 }
 
+interface LevelTableRowProps {
+  fr: FlatRow;
+  rowIndex: number;
+  level: Level;
+  metric: Metric;
+  colCount: number;
+  maxMag: number;
+  itemsOpen: boolean;
+  chainsOpen: boolean;
+  onToggle: (key: string, target?: ItemTarget) => void;
+  onFilter: (r: GroupRow) => void;
+}
+
+export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableRow({
+  fr,
+  rowIndex,
+  level,
+  metric,
+  colCount,
+  maxMag,
+  itemsOpen,
+  chainsOpen,
+  onToggle,
+  onFilter,
+}) {
+  if (fr.kind === 'status') {
+    return (
+      <tr aria-rowindex={rowIndex} className="bg-slate-50/70 dark:bg-slate-900/40">
+        <td colSpan={colCount} className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400" style={{ paddingLeft: 16 + fr.depth * 22 }}>
+          {fr.state === 'loading' ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-500" /> Loading items…
+            </span>
+          ) : fr.state === 'empty' ? (
+            'No items'
+          ) : (
+            <span>
+              Could not load items.{' '}
+              {fr.retry && (
+                <button type="button" onClick={fr.retry} className="font-semibold text-sky-600 hover:underline dark:text-sky-400">
+                  Retry
+                </button>
+              )}
+            </span>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
+  const { row: r, d, depth, kind } = fr;
+  const isItem = kind === 'item';
+  const isUp = d.status === 'growing' || d.status === 'new';
+  const isDown = d.status === 'declining' || d.status === 'lost';
+  const tone = isUp ? 'text-up dark:text-up-light' : isDown ? 'text-down dark:text-down-light' : 'text-slate-500';
+  const barWidth = Math.min(100, Math.round((Math.abs(d.delta) / maxMag) * 100));
+
+  return (
+    <tr
+      aria-rowindex={rowIndex}
+      onClick={isItem ? undefined : () => onToggle(r.id, fr.target)}
+      className={`group transition-colors ${isItem ? '' : 'cursor-pointer'} ${
+        depth === 0
+          ? 'hover:bg-sky-500/10'
+          : isItem
+            ? 'bg-indigo-50/40 hover:bg-indigo-500/10 dark:bg-indigo-950/20'
+            : 'bg-slate-50/70 hover:bg-sky-500/10 dark:bg-slate-900/40'
+      }`}
+    >
+      {/* Label */}
+      <td className="px-3 py-1.5 align-middle">
+        <div className="flex items-center justify-between gap-2" style={{ paddingLeft: depth * 22 }}>
+          <div
+            className={`flex min-w-0 items-center gap-1.5 ${
+              depth === 0 ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            {isItem ? (
+              <Package className="h-3.5 w-3.5 shrink-0 text-indigo-400" />
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle(r.id, fr.target);
+                }}
+                aria-expanded={itemsOpen}
+                aria-controls={`items-${r.id}`}
+                aria-label={`${itemsOpen ? 'Hide' : 'Show'} items of ${r.label}`}
+                className="rounded-md p-0.5 text-slate-500 hover:text-sky-600 dark:text-slate-400 dark:hover:text-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              >
+                {itemsOpen ? <ChevronDown className="h-4 w-4 text-sky-500" /> : <ChevronRight className="h-4 w-4" />}
+              </button>
+            )}
+            <span className="truncate" dir="auto" title={r.label}>
+              {r.label}
+            </span>
+            {isItem && r.brand && (
+              <span className="shrink-0 truncate text-[10px] text-slate-400 dark:text-slate-500" dir="auto">
+                {r.brand}
+              </span>
+            )}
+            {kind === 'chain' && (
+              <span className="shrink-0 rounded bg-slate-200/70 px-1 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                Chain
+              </span>
+            )}
+            {kind === 'row' && r.children && r.children.length > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle(r.id + CHAINS_SUFFIX);
+                }}
+                aria-expanded={chainsOpen}
+                aria-controls={`chains-${r.id}`}
+                title={`${chainsOpen ? 'Hide' : 'Show'} chain breakdown`}
+                className={`ml-1 inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                  chainsOpen
+                    ? 'bg-sky-600 text-white'
+                    : 'bg-slate-200/80 text-slate-600 hover:bg-sky-500/20 dark:bg-slate-800 dark:text-slate-300'
+                }`}
+              >
+                <Network className="h-3 w-3" />
+                {r.children.length} chains
+              </button>
+            )}
+          </div>
+          {!isItem && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFilter(r);
+              }}
+              title="Filter the whole dashboard by this row"
+              aria-label={`Filter dashboard by ${r.label}`}
+              className="rounded-md p-1 text-slate-400 opacity-0 transition-opacity hover:bg-sky-500/15 hover:text-sky-600 focus:opacity-100 group-hover:opacity-100 dark:hover:text-sky-300"
+            >
+              <Filter className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </td>
+
+      {level === 'brick' && (
+        <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
+          {depth === 0 && (
+            <div className="flex items-center truncate">
+              <span className="truncate">{r.territory}</span>
+              <OthersBadge others={r.territoryOthers} fieldName="Territory" />
+            </div>
+          )}
+        </td>
+      )}
+      {level === 'customer' && (
+        <>
+          <td className="px-3 py-1.5 font-mono text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+            {depth === 0 ? r.customerId : ''}
+          </td>
+          <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
+            {depth === 0 && (
+              <div className="flex items-center truncate">
+                <span className="truncate">{r.brick}</span>
+                <OthersBadge others={r.brickOthers} fieldName="Brick" />
+              </div>
+            )}
+          </td>
+          <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
+            {depth === 0 && (
+              <div className="flex items-center truncate">
+                <span className="truncate">{r.subType}</span>
+                <OthersBadge others={r.subTypeOthers} fieldName="SubType" />
+              </div>
+            )}
+          </td>
+        </>
+      )}
+
+      <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtMetric(d.py, metric, false)}</td>
+      <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+        {fmtMetric(d.cy, metric, false)}
+      </td>
+      <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${tone}`}>{fmtSigned(d.delta, metric, false)}</td>
+      <td className="px-3 py-1.5">
+        <div className="flex flex-col items-end gap-1">
+          {d.growth.kind === 'new' ? (
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-bold text-sky-700 dark:text-sky-300">
+              <Sparkles className="h-3 w-3" />
+              New
+            </span>
+          ) : (
+            <span className={`text-xs font-bold tabular-nums ${tone}`}>
+              {isUp ? '▲' : isDown ? '▼' : ''}
+              {fmtGrowth(d.growth)}
+            </span>
+          )}
+          <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-800">
+            <div
+              style={{ width: `${barWidth}%` }}
+              className={`h-full rounded-full ${isUp ? 'bg-up' : isDown ? 'bg-down' : 'bg-slate-400'}`}
+            />
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 interface LevelTableProps {
   level: Level;
 }
 
 export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
-  const { result, metric, itemsByRow, fetchItems, addDrillRow } = useDashboardStore();
+  const [, startTransition] = useTransition();
+
+  const { rows, period, totals, metric, itemsByRow, fetchItems, addDrillRow } = useDashboardStore(
+    useShallow((s) => ({
+      rows: s.result?.levels[level],
+      period: s.result?.period,
+      totals: s.result?.totals,
+      metric: s.metric,
+      itemsByRow: s.itemsByRow,
+      fetchItems: s.fetchItems,
+      addDrillRow: s.addDrillRow,
+    }))
+  );
 
   const [sort, setSort] = useState<{ id: SortId; desc: boolean }>({ id: 'delta', desc: true });
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [status, setStatus] = useState<StatusFilter>('all');
   const [topN, setTopN] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = useState(false);
   const targets = useRef(new Map<string, ItemTarget>());
 
-  const rows = result?.levels[level] ?? [];
+  const rowList = rows ?? [];
 
   // Re-fetch item breakdowns of expanded rows after the analysis was refreshed (filters changed).
   useEffect(() => {
@@ -109,23 +332,43 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     }
   }, [expanded, itemsByRow, fetchItems]);
 
-  const toggle = (key: string, target?: ItemTarget) => {
-    const next = new Set(expanded);
-    if (next.has(key)) {
-      next.delete(key);
-    } else {
-      next.add(key);
-      if (target) {
-        targets.current.set(key, target);
-        void fetchItems(key, target);
+  const toggle = useCallback((key: string, target?: ItemTarget) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+        if (target) {
+          targets.current.set(key, target);
+          void fetchItems(key, target);
+        }
       }
-    }
-    setExpanded(next);
-  };
+      return next;
+    });
+  }, [fetchItems]);
+
+  const handleFilter = useCallback(
+    (r: GroupRow) => {
+      const chips: DrillChip[] = [];
+      if (r.field === 'Chain' && r.parentValue !== undefined) {
+        chips.push({ field: 'SubType', value: r.parentValue, label: r.parentValue });
+        chips.push({ field: 'Chain', value: r.value, label: r.label });
+      } else if (r.field !== 'Item') {
+        chips.push({ field: r.field, value: r.value, label: r.label });
+      }
+      if (chips.length) {
+        startTransition(() => {
+          addDrillRow(chips);
+        });
+      }
+    },
+    [addDrillRow]
+  );
 
   const topRows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let list = rows.map((row) => ({ row, d: deriveRow(row.sums, metric) }));
+    const q = deferredSearch.trim().toLowerCase();
+    let list = rowList.map((row) => ({ row, d: deriveRow(row.sums, metric) }));
     if (status !== 'all') list = list.filter((x) => x.d.status === status);
     if (q) {
       list = list.filter(({ row: r }) =>
@@ -139,7 +382,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
       list = topN > 0 ? byDelta.slice(0, topN) : byDelta.slice(topN).reverse();
     }
     return sortList(list, sort.id, sort.desc);
-  }, [rows, metric, status, search, topN, sort]);
+  }, [rowList, metric, status, deferredSearch, topN, sort]);
 
   const maxMag = useMemo(() => {
     let m = 0;
@@ -202,235 +445,50 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     overscan: 12,
   });
 
-  if (!result) return null;
+  if (!rows || !period || !totals) return null;
 
   const extraCols = level === 'customer' ? 3 : level === 'brick' ? 1 : 0;
   const colCount = 5 + extraCols;
-  const total = deriveRow(result.totals, metric);
+  const total = deriveRow(totals, metric);
   const label = LEVEL_LABEL[level];
 
-  const handleFilter = (r: GroupRow) => {
-    const chips: DrillChip[] = [];
-    if (r.field === 'Chain' && r.parentValue !== undefined) {
-      chips.push({ field: 'SubType', value: r.parentValue, label: r.parentValue });
-      chips.push({ field: 'Chain', value: r.value, label: r.label });
-    } else if (r.field !== 'Item') {
-      chips.push({ field: r.field, value: r.value, label: r.label });
-    }
-    if (chips.length) addDrillRow(chips);
-  };
-
-  const headerCell = (id: SortId, text: string, align: 'left' | 'right' = 'right') => (
-    <th
-      className={`border-b border-slate-200/80 dark:border-slate-800 px-3 py-2 font-bold uppercase tracking-wider text-[11px] text-slate-600 dark:text-slate-300 select-none ${
-        align === 'right' ? 'text-right' : 'text-left'
-      }`}
-    >
-      <button
-        type="button"
-        onClick={() => setSort((s) => ({ id, desc: s.id === id ? !s.desc : id !== 'label' }))}
-        className={`inline-flex items-center gap-1 hover:text-sky-600 dark:hover:text-sky-400 focus:outline-none ${
-          align === 'right' ? 'ml-auto' : ''
+  const headerCell = (id: SortId, text: string, align: 'left' | 'right' = 'right') => {
+    const isSorted = sort.id === id;
+    const sortState = isSorted ? (sort.desc ? 'descending' : 'ascending') : 'none';
+    return (
+      <th
+        aria-sort={sortState}
+        className={`border-b border-slate-200/80 dark:border-slate-800 px-3 py-2 font-bold uppercase tracking-wider text-[11px] text-slate-600 dark:text-slate-300 select-none ${
+          align === 'right' ? 'text-right' : 'text-left'
         }`}
       >
-        {text}
-        {sort.id === id ? (
-          sort.desc ? (
-            <ArrowDown className="h-3.5 w-3.5 text-sky-500" />
+        <button
+          type="button"
+          onClick={() => setSort((s) => ({ id, desc: s.id === id ? !s.desc : id !== 'label' }))}
+          className={`inline-flex items-center gap-1 hover:text-sky-600 dark:hover:text-sky-400 focus:outline-none ${
+            align === 'right' ? 'ml-auto' : ''
+          }`}
+        >
+          {text}
+          {sort.id === id ? (
+            sort.desc ? (
+              <ArrowDown className="h-3.5 w-3.5 text-sky-500" />
+            ) : (
+              <ArrowUp className="h-3.5 w-3.5 text-sky-500" />
+            )
           ) : (
-            <ArrowUp className="h-3.5 w-3.5 text-sky-500" />
-          )
-        ) : (
-          <ArrowUpDown className="h-3 w-3 opacity-35" />
-        )}
-      </button>
-    </th>
-  );
+            <ArrowUpDown className="h-3 w-3 opacity-35" />
+          )}
+        </button>
+      </th>
+    );
+  };
 
   const plainHeader = (text: string) => (
     <th className="border-b border-slate-200/80 dark:border-slate-800 px-3 py-2 text-left font-bold uppercase tracking-wider text-[11px] text-slate-600 dark:text-slate-300">
       {text}
     </th>
   );
-
-  const renderLine = (fr: FlatRow) => {
-    if (fr.kind === 'status') {
-      return (
-        <tr key={fr.key} className="bg-slate-50/70 dark:bg-slate-900/40">
-          <td colSpan={colCount} className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400" style={{ paddingLeft: 16 + fr.depth * 22 }}>
-            {fr.state === 'loading' ? (
-              <span className="inline-flex items-center gap-1.5">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-500" /> Loading items…
-              </span>
-            ) : fr.state === 'empty' ? (
-              'No items'
-            ) : (
-              <span>
-                Could not load items.{' '}
-                {fr.retry && (
-                  <button type="button" onClick={fr.retry} className="font-semibold text-sky-600 hover:underline dark:text-sky-400">
-                    Retry
-                  </button>
-                )}
-              </span>
-            )}
-          </td>
-        </tr>
-      );
-    }
-
-    const { row: r, d, depth, kind } = fr;
-    const isItem = kind === 'item';
-    const itemsOpen = !isItem && expanded.has(r.id);
-    const chainsOpen = kind === 'row' && Boolean(r.children?.length) && expanded.has(r.id + CHAINS_SUFFIX);
-    const isUp = d.status === 'growing' || d.status === 'new';
-    const isDown = d.status === 'declining' || d.status === 'lost';
-    const tone = isUp ? 'text-up dark:text-up-light' : isDown ? 'text-down dark:text-down-light' : 'text-slate-500';
-    const barWidth = Math.min(100, Math.round((Math.abs(d.delta) / maxMag) * 100));
-
-    return (
-      <tr
-        key={fr.key}
-        onClick={isItem ? undefined : () => toggle(r.id, fr.target)}
-        className={`group transition-colors ${isItem ? '' : 'cursor-pointer'} ${
-          depth === 0
-            ? 'hover:bg-sky-500/10'
-            : isItem
-              ? 'bg-indigo-50/40 hover:bg-indigo-500/10 dark:bg-indigo-950/20'
-              : 'bg-slate-50/70 hover:bg-sky-500/10 dark:bg-slate-900/40'
-        }`}
-      >
-        {/* Label */}
-        <td className="px-3 py-1.5 align-middle">
-          <div className="flex items-center justify-between gap-2" style={{ paddingLeft: depth * 22 }}>
-            <div
-              className={`flex min-w-0 items-center gap-1.5 ${
-                depth === 0 ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-700 dark:text-slate-300'
-              }`}
-            >
-              {isItem ? (
-                <Package className="h-3.5 w-3.5 shrink-0 text-indigo-400" />
-              ) : (
-                <span
-                  aria-label={`${itemsOpen ? 'Hide' : 'Show'} items of ${r.label}`}
-                  className="rounded-md p-0.5 text-slate-500 dark:text-slate-400"
-                >
-                  {itemsOpen ? <ChevronDown className="h-4 w-4 text-sky-500" /> : <ChevronRight className="h-4 w-4" />}
-                </span>
-              )}
-              <span className="truncate" dir="auto" title={r.label}>
-                {r.label}
-              </span>
-              {isItem && r.brand && (
-                <span className="shrink-0 truncate text-[10px] text-slate-400 dark:text-slate-500" dir="auto">
-                  {r.brand}
-                </span>
-              )}
-              {kind === 'chain' && (
-                <span className="shrink-0 rounded bg-slate-200/70 px-1 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                  Chain
-                </span>
-              )}
-              {kind === 'row' && r.children && r.children.length > 0 && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggle(r.id + CHAINS_SUFFIX);
-                  }}
-                  aria-expanded={chainsOpen}
-                  title={`${chainsOpen ? 'Hide' : 'Show'} chain breakdown`}
-                  className={`ml-1 inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
-                    chainsOpen
-                      ? 'bg-sky-600 text-white'
-                      : 'bg-slate-200/80 text-slate-600 hover:bg-sky-500/20 dark:bg-slate-800 dark:text-slate-300'
-                  }`}
-                >
-                  <Network className="h-3 w-3" />
-                  {r.children.length} chains
-                </button>
-              )}
-            </div>
-            {!isItem && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleFilter(r);
-                }}
-                title="Filter the whole dashboard by this row"
-                aria-label={`Filter dashboard by ${r.label}`}
-                className="rounded-md p-1 text-slate-400 opacity-0 transition-opacity hover:bg-sky-500/15 hover:text-sky-600 focus:opacity-100 group-hover:opacity-100 dark:hover:text-sky-300"
-              >
-                <Filter className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        </td>
-
-        {level === 'brick' && (
-          <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
-            {depth === 0 && (
-              <div className="flex items-center truncate">
-                <span className="truncate">{r.territory}</span>
-                <OthersBadge others={r.territoryOthers} fieldName="Territory" />
-              </div>
-            )}
-          </td>
-        )}
-        {level === 'customer' && (
-          <>
-            <td className="px-3 py-1.5 font-mono text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-              {depth === 0 ? r.customerId : ''}
-            </td>
-            <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
-              {depth === 0 && (
-                <div className="flex items-center truncate">
-                  <span className="truncate">{r.brick}</span>
-                  <OthersBadge others={r.brickOthers} fieldName="Brick" />
-                </div>
-              )}
-            </td>
-            <td className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300" dir="auto">
-              {depth === 0 && (
-                <div className="flex items-center truncate">
-                  <span className="truncate">{r.subType}</span>
-                  <OthersBadge others={r.subTypeOthers} fieldName="SubType" />
-                </div>
-              )}
-            </td>
-          </>
-        )}
-
-        <td className="px-3 py-1.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtMetric(d.py, metric, false)}</td>
-        <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-          {fmtMetric(d.cy, metric, false)}
-        </td>
-        <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${tone}`}>{fmtSigned(d.delta, metric, false)}</td>
-        <td className="px-3 py-1.5">
-          <div className="flex flex-col items-end gap-1">
-            {d.growth.kind === 'new' ? (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-bold text-sky-700 dark:text-sky-300">
-                <Sparkles className="h-3 w-3" />
-                New
-              </span>
-            ) : (
-              <span className={`text-xs font-bold tabular-nums ${tone}`}>
-                {isUp ? '▲' : isDown ? '▼' : ''}
-                {fmtGrowth(d.growth)}
-              </span>
-            )}
-            <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-800">
-              <div
-                style={{ width: `${barWidth}%` }}
-                className={`h-full rounded-full ${isUp ? 'bg-up' : isDown ? 'bg-down' : 'bg-slate-400'}`}
-              />
-            </div>
-          </div>
-        </td>
-      </tr>
-    );
-  };
 
   const vItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
@@ -439,8 +497,9 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
 
   return (
     <section
+      id={`table-${level}`}
       aria-label={`${label} level table`}
-      className="glass-panel flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 dark:border-slate-800/80"
+      className="glass-panel flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 dark:border-slate-800/80 scroll-mt-20"
     >
       {/* Table toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 px-3.5 py-2 dark:border-slate-800/80">
@@ -456,7 +515,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
           </button>
           <h2 className="text-sm font-bold text-slate-900 dark:text-white">{label} Level</h2>
           <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
-            {topRows.length.toLocaleString('en-US')} of {rows.length.toLocaleString('en-US')} · click a row to drill down by items
+            {topRows.length.toLocaleString('en-US')} of {rowList.length.toLocaleString('en-US')} · click a row to drill down by items
             {level === 'subtype' && ' · use “chains” for the chain breakdown'}
           </span>
         </div>
@@ -523,7 +582,10 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
 
       {!collapsed && (
         <div ref={parentRef} className="max-h-[440px] overflow-auto">
-          <table className="w-full border-collapse text-left text-xs">
+          <table
+            aria-rowcount={flat.length}
+            className="w-full border-collapse text-left text-xs"
+          >
             <thead className="sticky top-0 z-20 bg-slate-100/95 shadow-sm backdrop-blur-md dark:bg-slate-900/95">
               <tr>
                 {headerCell('label', level === 'customer' ? 'Customer' : label, 'left')}
@@ -535,8 +597,8 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                     {plainHeader('SubType')}
                   </>
                 )}
-                {headerCell('py', `PY (${result.period.pyLabel})`)}
-                {headerCell('cy', `CY (${result.period.cyLabel})`)}
+                {headerCell('py', `PY (${period.pyLabel})`)}
+                {headerCell('cy', `CY (${period.cyLabel})`)}
                 {headerCell('delta', 'YoY Growth')}
                 {headerCell('growth', 'YoY Growth %')}
               </tr>
@@ -554,7 +616,47 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                   <td style={{ height: padTop }} colSpan={colCount} />
                 </tr>
               )}
-              {vItems.map((v) => renderLine(flat[v.index]))}
+              {vItems.map((v) => {
+                const fr = flat[v.index];
+                if (fr.kind === 'status') {
+                  return (
+                    <LevelTableRow
+                      key={fr.key}
+                      fr={fr}
+                      rowIndex={v.index + 1}
+                      level={level}
+                      metric={metric}
+                      colCount={colCount}
+                      maxMag={maxMag}
+                      itemsOpen={false}
+                      chainsOpen={false}
+                      onToggle={toggle}
+                      onFilter={handleFilter}
+                    />
+                  );
+                }
+
+                const isItem = fr.kind === 'item';
+                const itemsOpen = !isItem && expanded.has(fr.row.id);
+                const chainsOpen =
+                  fr.kind === 'row' && Boolean(fr.row.children?.length) && expanded.has(fr.row.id + CHAINS_SUFFIX);
+
+                return (
+                  <LevelTableRow
+                    key={fr.key}
+                    fr={fr}
+                    rowIndex={v.index + 1}
+                    level={level}
+                    metric={metric}
+                    colCount={colCount}
+                    maxMag={maxMag}
+                    itemsOpen={itemsOpen}
+                    chainsOpen={chainsOpen}
+                    onToggle={toggle}
+                    onFilter={handleFilter}
+                  />
+                );
+              })}
               {padBottom > 0 && (
                 <tr>
                   <td style={{ height: padBottom }} colSpan={colCount} />
@@ -564,7 +666,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
             <tfoot className="sticky bottom-0 z-20 border-t-2 border-slate-300 bg-slate-100/95 font-bold text-slate-900 shadow-inner backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/95 dark:text-white">
               <tr>
                 <td className="px-3 py-2" colSpan={1 + extraCols}>
-                  Total ({rows.length.toLocaleString('en-US')} {label.toLowerCase()}s)
+                  Total ({rowList.length.toLocaleString('en-US')} {label.toLowerCase()}s)
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmtMetric(total.py, metric, false)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmtMetric(total.cy, metric, false)}</td>

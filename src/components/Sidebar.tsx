@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useTransition } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -8,7 +8,9 @@ import {
   TrendingUp,
   Sparkles,
   Minus,
+  X,
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { fmtCompact, fmtGrowth } from '../lib/format';
 import { Growth, metricCells } from '../lib/metrics';
 import { useDashboardStore } from '../store/useDashboardStore';
@@ -54,6 +56,9 @@ function GrowthBadge({ g }: { g: Growth }) {
 }
 
 export const Sidebar: React.FC = () => {
+  const [, startTransition] = useTransition();
+  const navRef = useRef<HTMLElement>(null);
+
   const {
     meta,
     result,
@@ -64,7 +69,23 @@ export const Sidebar: React.FC = () => {
     sidebarSearch,
     setSidebarSearch,
     perLineFilters,
-  } = useDashboardStore();
+    mobileDrawerOpen,
+    setMobileDrawerOpen,
+  } = useDashboardStore(
+    useShallow((s) => ({
+      meta: s.meta,
+      result: s.result,
+      line: s.line,
+      setLine: s.setLine,
+      sidebarCollapsed: s.sidebarCollapsed,
+      setSidebarCollapsed: s.setSidebarCollapsed,
+      sidebarSearch: s.sidebarSearch,
+      setSidebarSearch: s.setSidebarSearch,
+      perLineFilters: s.perLineFilters,
+      mobileDrawerOpen: s.mobileDrawerOpen,
+      setMobileDrawerOpen: s.setMobileDrawerOpen,
+    }))
+  );
 
   const sortedLines = useMemo(() => {
     const allLines = meta?.lines ?? [];
@@ -89,203 +110,236 @@ export const Sidebar: React.FC = () => {
   const handleKeyDown = (e: React.KeyboardEvent, current: string | null) => {
     const idx = tabOrder.indexOf(current);
     if (idx < 0) return;
+    let targetIdx = -1;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      const next = tabOrder[(idx + 1) % tabOrder.length];
-      setLine(next);
+      targetIdx = (idx + 1) % tabOrder.length;
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      const prev = tabOrder[(idx - 1 + tabOrder.length) % tabOrder.length];
-      setLine(prev);
+      targetIdx = (idx - 1 + tabOrder.length) % tabOrder.length;
     } else if (e.key === 'Home') {
       e.preventDefault();
-      setLine(null);
+      targetIdx = 0;
     } else if (e.key === 'End') {
       e.preventDefault();
-      setLine(tabOrder[tabOrder.length - 1]);
+      targetIdx = tabOrder.length - 1;
+    }
+    if (targetIdx >= 0) {
+      const buttons = navRef.current?.querySelectorAll<HTMLButtonElement>('button[data-line-btn]');
+      buttons?.[targetIdx]?.focus();
     }
   };
 
+  const selectLine = (l: string | null) => {
+    startTransition(() => {
+      setLine(l);
+    });
+    setMobileDrawerOpen(false);
+  };
+
   return (
-    <aside
-      aria-label="Sales Lines navigation"
-      className={`glass-panel flex shrink-0 flex-col border-r border-slate-200/70 dark:border-slate-800/80 transition-all duration-200 ${
-        sidebarCollapsed ? 'w-16' : 'w-72'
-      }`}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-slate-800/70 px-3 py-3.5">
-        {!sidebarCollapsed && (
-          <div className="flex items-center gap-2 overflow-hidden">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-sm">
-              <Layers className="h-4 w-4" />
+    <>
+      {/* Mobile Drawer Backdrop */}
+      {mobileDrawerOpen && (
+        <div
+          role="presentation"
+          onClick={() => setMobileDrawerOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm md:hidden"
+        />
+      )}
+
+      <aside
+        aria-label="Sales Lines navigation"
+        className={`glass-panel shrink-0 flex-col border-r border-slate-200/70 dark:border-slate-800/80 transition-all duration-200 ${
+          mobileDrawerOpen
+            ? 'fixed inset-y-0 left-0 z-50 flex w-72 shadow-2xl'
+            : `hidden md:flex ${sidebarCollapsed ? 'w-16' : 'w-72'}`
+        }`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-slate-800/70 px-3 py-3.5">
+          {(!sidebarCollapsed || mobileDrawerOpen) && (
+            <div className="flex items-center gap-2 overflow-hidden">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-sm">
+                <Layers className="h-4 w-4" />
+              </div>
+              <div className="truncate">
+                <h1 className="truncate text-sm font-bold tracking-tight text-slate-900 dark:text-white">
+                  Sales Lines
+                </h1>
+                <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                  Sorted by CY Value
+                </p>
+              </div>
             </div>
-            <div className="truncate">
-              <h1 className="truncate text-sm font-bold tracking-tight text-slate-900 dark:text-white">
-                Sales Lines
-              </h1>
-              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-                Sorted by CY Value
-              </p>
+          )}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(false)}
+              aria-label="Close sidebar"
+              className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white md:hidden"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden md:inline-flex rounded-lg p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+            >
+              {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Search */}
+        {(!sidebarCollapsed || mobileDrawerOpen) && (
+          <div className="px-3 pt-2.5 pb-1.5">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={sidebarSearch}
+                onChange={(e) => setSidebarSearch(e.target.value)}
+                placeholder="Filter lines..."
+                aria-label="Filter sales lines"
+                className="w-full rounded-lg border border-slate-200/80 bg-white/60 py-1.5 pl-8 pr-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-slate-700/80 dark:bg-slate-900/50 dark:text-slate-100"
+              />
             </div>
           </div>
         )}
-        <button
-          type="button"
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+
+        {/* Line Navigation */}
+        <nav
+          ref={navRef}
+          aria-label="Sales Lines"
+          className="flex-1 space-y-1 overflow-y-auto px-2 py-2"
         >
-          {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-        </button>
-      </div>
+          {/* All Lines */}
+          {(() => {
+            const active = line === null;
+            const f = perLineFilters['__ALL__'];
+            const fCount = (f?.brands.length ?? 0) + (f?.items.length ?? 0);
+            return (
+              <button
+                data-line-btn
+                type="button"
+                aria-current={active ? 'page' : undefined}
+                onClick={() => selectLine(null)}
+                onKeyDown={(e) => handleKeyDown(e, null)}
+                title={`All Lines — CY Value: EGP ${fmtCompact(allLinesCells.sums.cyV)} (${fmtGrowth(allLinesCells.cells.growth)})`}
+                className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                  active
+                    ? 'bg-gradient-to-r from-sky-600 to-indigo-600 font-semibold text-white shadow-sm'
+                    : 'text-slate-700 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/70'
+                }`}
+              >
+                {sidebarCollapsed && !mobileDrawerOpen ? (
+                  <span className="mx-auto font-bold">ALL</span>
+                ) : (
+                  <>
+                    <div className="min-w-0 flex-1 pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate font-semibold">All Lines</span>
+                        {fCount > 0 && (
+                          <span
+                            className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                              active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
+                            }`}
+                          >
+                            {fCount}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className={`text-[11px] tabular-nums ${
+                          active ? 'text-sky-100' : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        EGP {fmtCompact(allLinesCells.sums.cyV)}
+                      </div>
+                    </div>
+                    <div className={active ? 'rounded-full bg-white/90 p-0.5' : ''}>
+                      <GrowthBadge g={allLinesCells.cells.growth} />
+                    </div>
+                  </>
+                )}
+              </button>
+            );
+          })()}
 
-      {/* Search */}
-      {!sidebarCollapsed && (
-        <div className="px-3 pt-2.5 pb-1.5">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              type="search"
-              value={sidebarSearch}
-              onChange={(e) => setSidebarSearch(e.target.value)}
-              placeholder="Filter lines..."
-              aria-label="Filter sales lines"
-              className="w-full rounded-lg border border-slate-200/80 bg-white/60 py-1.5 pl-8 pr-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-slate-700/80 dark:bg-slate-900/50 dark:text-slate-100"
-            />
+          <div className="my-1.5 border-t border-slate-200/60 dark:border-slate-800/70" />
+
+          {sortedLines.map((item) => {
+            const active = line === item.name;
+            const f = perLineFilters[item.name];
+            const fCount = (f?.brands.length ?? 0) + (f?.items.length ?? 0);
+            const shortCode = item.name
+              .split(/\s+/)
+              .map((w) => w[0])
+              .join('')
+              .toUpperCase()
+              .slice(0, 3);
+            return (
+              <button
+                data-line-btn
+                key={item.name}
+                type="button"
+                aria-current={active ? 'page' : undefined}
+                onClick={() => selectLine(item.name)}
+                onKeyDown={(e) => handleKeyDown(e, item.name)}
+                title={`${item.name} — CY Value: EGP ${fmtCompact(item.sums.cyV)} (${fmtGrowth(item.cells.growth)})`}
+                className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                  active
+                    ? 'bg-gradient-to-r from-sky-600 to-indigo-600 font-semibold text-white shadow-sm'
+                    : 'text-slate-700 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/70'
+                }`}
+              >
+                {sidebarCollapsed && !mobileDrawerOpen ? (
+                  <span className="mx-auto font-bold">{shortCode}</span>
+                ) : (
+                  <>
+                    <div className="min-w-0 flex-1 pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate" dir="auto">
+                          {item.name}
+                        </span>
+                        {fCount > 0 && (
+                          <span
+                            className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                              active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
+                            }`}
+                          >
+                            {fCount}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className={`text-[11px] tabular-nums ${
+                          active ? 'text-sky-100' : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        EGP {fmtCompact(item.sums.cyV)}
+                      </div>
+                    </div>
+                    <div className={active ? 'rounded-full bg-white/90 p-0.5' : ''}>
+                      <GrowthBadge g={item.cells.growth} />
+                    </div>
+                  </>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {(!sidebarCollapsed || mobileDrawerOpen) && (
+          <div className="border-t border-slate-200/60 dark:border-slate-800/70 px-3 py-2 text-[11px] text-slate-400 dark:text-slate-500">
+            {sortedLines.length} lines · click to filter
           </div>
-        </div>
-      )}
-
-      {/* Line tabs */}
-      <nav
-        role="tablist"
-        aria-orientation="vertical"
-        className="flex-1 space-y-1 overflow-y-auto px-2 py-2"
-      >
-        {/* All Lines tab */}
-        {(() => {
-          const active = line === null;
-          const f = perLineFilters['__ALL__'];
-          const fCount = (f?.brands.length ?? 0) + (f?.items.length ?? 0);
-          return (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setLine(null)}
-              onKeyDown={(e) => handleKeyDown(e, null)}
-              title={`All Lines — CY Value: EGP ${fmtCompact(allLinesCells.sums.cyV)} (${fmtGrowth(allLinesCells.cells.growth)})`}
-              className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 ${
-                active
-                  ? 'bg-gradient-to-r from-sky-600 to-indigo-600 font-semibold text-white shadow-sm'
-                  : 'text-slate-700 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/70'
-              }`}
-            >
-              {sidebarCollapsed ? (
-                <span className="mx-auto font-bold">ALL</span>
-              ) : (
-                <>
-                  <div className="min-w-0 flex-1 pr-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate font-semibold">All Lines</span>
-                      {fCount > 0 && (
-                        <span
-                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                            active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
-                          }`}
-                        >
-                          {fCount}
-                        </span>
-                      )}
-                    </div>
-                    <div
-                      className={`text-[11px] tabular-nums ${
-                        active ? 'text-sky-100' : 'text-slate-500 dark:text-slate-400'
-                      }`}
-                    >
-                      EGP {fmtCompact(allLinesCells.sums.cyV)}
-                    </div>
-                  </div>
-                  <div className={active ? 'rounded-full bg-white/90 p-0.5' : ''}>
-                    <GrowthBadge g={allLinesCells.cells.growth} />
-                  </div>
-                </>
-              )}
-            </button>
-          );
-        })()}
-
-        <div className="my-1.5 border-t border-slate-200/60 dark:border-slate-800/70" />
-
-        {sortedLines.map((item) => {
-          const active = line === item.name;
-          const f = perLineFilters[item.name];
-          const fCount = (f?.brands.length ?? 0) + (f?.items.length ?? 0);
-          const shortCode = item.name
-            .split(/\s+/)
-            .map((w) => w[0])
-            .join('')
-            .toUpperCase()
-            .slice(0, 3);
-          return (
-            <button
-              key={item.name}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setLine(item.name)}
-              onKeyDown={(e) => handleKeyDown(e, item.name)}
-              title={`${item.name} — CY Value: EGP ${fmtCompact(item.sums.cyV)} (${fmtGrowth(item.cells.growth)})`}
-              className={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 ${
-                active
-                  ? 'bg-gradient-to-r from-sky-600 to-indigo-600 font-semibold text-white shadow-sm'
-                  : 'text-slate-700 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/70'
-              }`}
-            >
-              {sidebarCollapsed ? (
-                <span className="mx-auto font-bold">{shortCode}</span>
-              ) : (
-                <>
-                  <div className="min-w-0 flex-1 pr-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate" dir="auto">
-                        {item.name}
-                      </span>
-                      {fCount > 0 && (
-                        <span
-                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                            active ? 'bg-white/25 text-white' : 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
-                          }`}
-                        >
-                          {fCount}
-                        </span>
-                      )}
-                    </div>
-                    <div
-                      className={`text-[11px] tabular-nums ${
-                        active ? 'text-sky-100' : 'text-slate-500 dark:text-slate-400'
-                      }`}
-                    >
-                      EGP {fmtCompact(item.sums.cyV)}
-                    </div>
-                  </div>
-                  <div className={active ? 'rounded-full bg-white/90 p-0.5' : ''}>
-                    <GrowthBadge g={item.cells.growth} />
-                  </div>
-                </>
-              )}
-            </button>
-          );
-        })}
-      </nav>
-
-      {!sidebarCollapsed && (
-        <div className="border-t border-slate-200/60 dark:border-slate-800/70 px-3 py-2 text-[11px] text-slate-400 dark:text-slate-500">
-          Badges reflect Value YoY % (global filters + drill chips).
-        </div>
-      )}
-    </aside>
+        )}
+      </aside>
+    </>
   );
 };

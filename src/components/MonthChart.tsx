@@ -11,10 +11,18 @@ import {
 } from 'recharts';
 import { fmtCompact, fmtGrowth, fmtMetric } from '../lib/format';
 import { METRIC_LABEL, metricCells } from '../lib/metrics';
+import { useShallow } from 'zustand/react/shallow';
 import { useDashboardStore } from '../store/useDashboardStore';
 
 export const MonthChart: React.FC = () => {
-  const { result, metric, period, theme } = useDashboardStore();
+  const { result, metric, period, theme } = useDashboardStore(
+    useShallow((s) => ({
+      result: s.result,
+      metric: s.metric,
+      period: s.period,
+      theme: s.theme,
+    }))
+  );
 
   const data = useMemo(() => {
     if (!result) return [];

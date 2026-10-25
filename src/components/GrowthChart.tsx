@@ -13,11 +13,22 @@ import {
 import { LEVELS, LEVEL_LABEL, Level } from '../lib/aggregate';
 import { fmtCompact, fmtGrowth, fmtPct, fmtSigned } from '../lib/format';
 import { METRIC_LABEL, deriveRow } from '../lib/metrics';
+import { useShallow } from 'zustand/react/shallow';
 import { useDashboardStore } from '../store/useDashboardStore';
 
 export const GrowthChart: React.FC = () => {
   const { result, metric, chartLevel, setChartLevel, chartMode, setChartMode, theme } =
-    useDashboardStore();
+    useDashboardStore(
+      useShallow((s) => ({
+        result: s.result,
+        metric: s.metric,
+        chartLevel: s.chartLevel,
+        setChartLevel: s.setChartLevel,
+        chartMode: s.chartMode,
+        setChartMode: s.setChartMode,
+        theme: s.theme,
+      }))
+    );
 
   const rows = result?.levels[chartLevel] ?? [];
 

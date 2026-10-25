@@ -16,7 +16,7 @@ import {
 } from '../lib/aggregate';
 import { SAMPLE_DATA_URL, TX_TYPES, TxType } from '../lib/config';
 import { DataErrorKind } from '../lib/columnar';
-import { METRICS, Metric } from '../lib/metrics';
+import { Metric } from '../lib/metrics';
 import { ParseProgress } from '../lib/parse';
 import { PeriodSelection, defaultSelection } from '../lib/periods';
 import { workerClient } from '../workers/workerClient';
@@ -37,29 +37,29 @@ export interface LoadErrorState {
 /** Item breakdown state of one table row: loaded rows, or loading / error marker. */
 export type ItemsEntry = GroupRow[] | 'loading' | 'error';
 
+import {
+  parseHashParams,
+  validateHashAgainstMeta,
+  serializeHashState,
+  getHashSnapshot,
+} from '../lib/hashState';
+
 const ALL_LINES_KEY = '__ALL__';
 
-function readHashParams(): { line?: string | null; metric?: Metric } {
-  if (typeof window === 'undefined') return {};
-  const raw = window.location.hash.replace(/^#/, '');
-  if (!raw) return {};
-  const params = new URLSearchParams(raw);
-  const out: { line?: string | null; metric?: Metric } = {};
-  if (params.has('line')) {
-    const l = params.get('line')!;
-    out.line = l === 'all' || l === '' ? null : l;
-  }
-  const m = params.get('metric') as Metric | null;
-  if (m && METRICS.includes(m)) out.metric = m;
-  return out;
-}
-
-function writeHashParams(line: string | null, metric: Metric) {
+function syncHashToUrl(st: DashboardState) {
   if (typeof window === 'undefined') return;
-  const params = new URLSearchParams();
-  params.set('line', line ?? 'all');
-  params.set('metric', metric);
-  const next = `#${params.toString()}`;
+  const lineKey = st.line ?? ALL_LINES_KEY;
+  const filter = st.perLineFilters[lineKey];
+  const next = serializeHashState({
+    metric: st.metric,
+    line: st.line,
+    period: st.period,
+    mainTypes: st.mainTypes,
+    txTypes: st.txTypes,
+    brands: filter?.brands,
+    items: filter?.items,
+    drill: st.drill,
+  });
   if (window.location.hash !== next) {
     window.history.replaceState(null, '', next);
   }
@@ -119,11 +119,13 @@ export interface DashboardState {
   setChartLevel: (l: Level) => void;
   setSidebarCollapsed: (c: boolean) => void;
   setSidebarSearch: (s: string) => void;
+  mobileDrawerOpen: boolean;
+  setMobileDrawerOpen: (open: boolean) => void;
   toggleTheme: () => void;
-  syncFromHash: () => void;
+  syncFromHash: (hashString?: string) => void;
 }
 
-const initialHash = readHashParams();
+const initialHash = parseHashParams(getHashSnapshot());
 
 /** Incremented on every analysis refresh so stale Item responses are discarded. */
 let analysisVersion = 0;
@@ -173,17 +175,26 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         set({ progress });
       });
       const defPeriod = defaultSelection(meta.availability);
-      const hash = readHashParams();
-      const validLine = hash.line && meta.lines.includes(hash.line) ? hash.line : null;
+      const initialHash = parseHashParams(getHashSnapshot());
+      const v = validateHashAgainstMeta(initialHash, meta, defPeriod);
+      const initialFilters: Record<string, { brands: string[]; items: string[] }> = {};
+      if (v.brands.length > 0 || v.items.length > 0) {
+        initialFilters[v.line ?? ALL_LINES_KEY] = { brands: v.brands, items: v.items };
+      }
       set({
         meta,
         sourceName,
-        period: defPeriod,
-        line: validLine,
+        metric: v.metric ?? get().metric,
+        line: v.line,
+        period: v.period,
+        mainTypes: v.mainTypes,
+        txTypes: v.txTypes,
+        drill: v.drill,
+        perLineFilters: initialFilters,
         loading: false,
         progress: null,
       });
-      writeHashParams(validLine, get().metric);
+      syncHashToUrl(get());
       await get().refreshAnalysis();
     } catch (e) {
       const err = e as { message?: string; kind?: DataErrorKind; details?: string[] };
@@ -210,6 +221,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       set({ result, analyzing: false, error: null, itemsByRow: {} });
     } catch (e) {
       if (version !== analysisVersion) return;
+      if ((e as Error)?.name === 'AbortError') return;
       const err = e as { message?: string; kind?: DataErrorKind; details?: string[] };
       set({
         analyzing: false,
@@ -237,28 +249,31 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   setMetric: (metric) => {
     set({ metric });
-    writeHashParams(get().line, metric);
+    syncHashToUrl(get());
   },
 
   setLine: (line) => {
     set({ line });
-    writeHashParams(line, get().metric);
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
   setPeriod: (patch) => {
     const next = { ...get().period, ...patch };
     set({ period: next });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
   setTxTypes: (txTypes) => {
     set({ txTypes });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
   setMainTypes: (mainTypes) => {
     set({ mainTypes });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
@@ -274,6 +289,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         [key]: { brands, items: nextItems },
       },
     });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
@@ -287,6 +303,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         [key]: { ...prev, items },
       },
     });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
@@ -299,6 +316,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       else nextDrill.push(chip);
     }
     set({ drill: nextDrill });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
@@ -306,11 +324,13 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     const st = get();
     const nextDrill = st.drill.filter((_, i) => i !== index);
     set({ drill: nextDrill });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
   clearDrillChips: () => {
     set({ drill: [] });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
@@ -326,6 +346,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       },
       drill: [],
     });
+    syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
@@ -333,6 +354,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setChartLevel: (chartLevel) => set({ chartLevel }),
   setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
   setSidebarSearch: (sidebarSearch) => set({ sidebarSearch }),
+  mobileDrawerOpen: false,
+  setMobileDrawerOpen: (mobileDrawerOpen) => set({ mobileDrawerOpen }),
 
   toggleTheme: () => {
     const next = get().theme === 'dark' ? 'light' : 'dark';
@@ -340,22 +363,26 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     set({ theme: next });
   },
 
-  syncFromHash: () => {
-    const h = readHashParams();
+  syncFromHash: (hashString?: string) => {
     const st = get();
-    let needRefresh = false;
-    const patch: Partial<DashboardState> = {};
-    if (h.metric && h.metric !== st.metric) patch.metric = h.metric;
-    if (h.line !== undefined) {
-      const validLine = h.line && st.meta?.lines.includes(h.line) ? h.line : null;
-      if (validLine !== st.line) {
-        patch.line = validLine;
-        needRefresh = true;
-      }
+    if (!st.meta) return;
+    const hash = hashString ?? getHashSnapshot();
+    const parsed = parseHashParams(hash);
+    const v = validateHashAgainstMeta(parsed, st.meta, st.period);
+    const lineKey = v.line ?? ALL_LINES_KEY;
+    const nextFilters = { ...st.perLineFilters };
+    if (v.brands.length > 0 || v.items.length > 0) {
+      nextFilters[lineKey] = { brands: v.brands, items: v.items };
     }
-    if (Object.keys(patch).length > 0) {
-      set(patch);
-      if (needRefresh) void get().refreshAnalysis();
-    }
+    set({
+      metric: v.metric ?? st.metric,
+      line: v.line,
+      period: v.period,
+      mainTypes: v.mainTypes,
+      txTypes: v.txTypes,
+      drill: v.drill,
+      perLineFilters: nextFilters,
+    });
+    void get().refreshAnalysis();
   },
 }));

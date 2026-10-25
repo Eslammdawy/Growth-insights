@@ -2,10 +2,16 @@ import React from 'react';
 import { ArrowDownRight, ArrowUpRight, Minus, Sparkles } from 'lucide-react';
 import { fmtGrowth, fmtMetric, fmtSigned, metricUnitLabel } from '../lib/format';
 import { metricCells } from '../lib/metrics';
+import { useShallow } from 'zustand/react/shallow';
 import { useDashboardStore } from '../store/useDashboardStore';
 
 export const KpiCards: React.FC = () => {
-  const { result, metric } = useDashboardStore();
+  const { result, metric } = useDashboardStore(
+    useShallow((s) => ({
+      result: s.result,
+      metric: s.metric,
+    }))
+  );
   if (!result) return null;
 
   const cells = metricCells(result.totals, metric);

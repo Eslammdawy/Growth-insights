@@ -22,6 +22,7 @@ class DataWorkerClient {
   private worker: Worker | null = null;
   private seq = 1;
   private pending = new Map<number, Pending>();
+  private currentAnalyzeId: number | null = null;
 
   private ensureWorker(): Worker {
     if (!this.worker) {
@@ -43,6 +44,8 @@ class DataWorkerClient {
           p.resolve(msg.result);
         } else if (msg.type === 'items') {
           p.resolve(msg.rows);
+        } else if (msg.type === 'cancelled') {
+          p.reject(new DOMException('Aborted', 'AbortError'));
         }
       };
     }
@@ -74,7 +77,31 @@ class DataWorkerClient {
   }
 
   analyze(query: AnalysisQuery): Promise<AnalysisResult> {
-    return this.call({ type: 'analyze', query });
+    const w = this.ensureWorker();
+    if (this.currentAnalyzeId !== null) {
+      const prevId = this.currentAnalyzeId;
+      const prevPending = this.pending.get(prevId);
+      if (prevPending) {
+        prevPending.reject(new DOMException('Aborted', 'AbortError'));
+        this.pending.delete(prevId);
+      }
+      w.postMessage({ id: this.seq++, type: 'cancel', targetId: prevId } as WorkerRequest);
+    }
+    const id = this.seq++;
+    this.currentAnalyzeId = id;
+    return new Promise<AnalysisResult>((resolve, reject) => {
+      this.pending.set(id, {
+        resolve: (val) => {
+          if (this.currentAnalyzeId === id) this.currentAnalyzeId = null;
+          resolve(val);
+        },
+        reject: (err) => {
+          if (this.currentAnalyzeId === id) this.currentAnalyzeId = null;
+          reject(err);
+        },
+      });
+      w.postMessage({ id, type: 'analyze', query } as WorkerRequest);
+    });
   }
 
   /** Item breakdown of one table row. */

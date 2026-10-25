@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Check, ChevronDown, Filter, Info, RotateCcw, Search, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { brandOptions, itemOptions } from '../lib/aggregate';
 import { TX_TYPES, TxType } from '../lib/config';
 import { useDashboardStore } from '../store/useDashboardStore';
@@ -157,6 +158,7 @@ const SearchableMultiSelect: React.FC<MultiSelectProps> = ({
 };
 
 export const Filters: React.FC = () => {
+  const [, startTransition] = useTransition();
   const {
     meta,
     line,
@@ -169,7 +171,21 @@ export const Filters: React.FC = () => {
     setItemsForCurrentLine,
     drill,
     resetFilters,
-  } = useDashboardStore();
+  } = useDashboardStore(
+    useShallow((s) => ({
+      meta: s.meta,
+      line: s.line,
+      txTypes: s.txTypes,
+      setTxTypes: s.setTxTypes,
+      mainTypes: s.mainTypes,
+      setMainTypes: s.setMainTypes,
+      perLineFilters: s.perLineFilters,
+      setBrandsForCurrentLine: s.setBrandsForCurrentLine,
+      setItemsForCurrentLine: s.setItemsForCurrentLine,
+      drill: s.drill,
+      resetFilters: s.resetFilters,
+    }))
+  );
 
   const lineKey = line ?? '__ALL__';
   const currentLineFilter = perLineFilters[lineKey] ?? { brands: [], items: [] };
@@ -191,11 +207,26 @@ export const Filters: React.FC = () => {
     drill.length;
 
   const toggleTxType = (t: TxType) => {
-    if (txTypes.includes(t)) {
-      if (txTypes.length > 1) setTxTypes(txTypes.filter((x) => x !== t));
-    } else {
-      setTxTypes([...txTypes, t]);
-    }
+    startTransition(() => {
+      if (txTypes.includes(t)) {
+        if (txTypes.length > 1) setTxTypes(txTypes.filter((x) => x !== t));
+      } else {
+        setTxTypes([...txTypes, t]);
+      }
+    });
+  };
+
+  const handleBrandsChange = (brands: string[]) => {
+    startTransition(() => setBrandsForCurrentLine(brands));
+  };
+  const handleItemsChange = (items: string[]) => {
+    startTransition(() => setItemsForCurrentLine(items));
+  };
+  const handleMainTypesChange = (types: string[]) => {
+    startTransition(() => setMainTypes(types));
+  };
+  const handleResetFilters = () => {
+    startTransition(() => resetFilters());
   };
 
   return (
@@ -221,7 +252,7 @@ export const Filters: React.FC = () => {
             scopeBadge={line ? `Line: ${line}` : 'All Lines'}
             options={availableBrands}
             selected={currentLineFilter.brands}
-            onChange={setBrandsForCurrentLine}
+            onChange={handleBrandsChange}
           />
 
           <SearchableMultiSelect
@@ -229,7 +260,7 @@ export const Filters: React.FC = () => {
             scopeBadge={line ? `Line: ${line}` : 'All Lines'}
             options={availableItems}
             selected={currentLineFilter.items}
-            onChange={setItemsForCurrentLine}
+            onChange={handleItemsChange}
           />
 
           <span className="mx-0.5 hidden h-4 w-px bg-slate-300 dark:bg-slate-700 sm:inline-block" />
@@ -240,7 +271,7 @@ export const Filters: React.FC = () => {
             scopeBadge="Global"
             options={meta?.mainTypes ?? []}
             selected={mainTypes}
-            onChange={setMainTypes}
+            onChange={handleMainTypesChange}
           />
 
           {/* Global Transaction Types Pills */}
@@ -289,7 +320,9 @@ export const Filters: React.FC = () => {
               <button
                 type="button"
                 onClick={() =>
-                  setBrandsForCurrentLine(currentLineFilter.brands.filter((x) => x !== b))
+                  startTransition(() =>
+                    setBrandsForCurrentLine(currentLineFilter.brands.filter((x) => x !== b))
+                  )
                 }
                 aria-label={`Remove brand ${b}`}
               >
@@ -306,7 +339,9 @@ export const Filters: React.FC = () => {
               <button
                 type="button"
                 onClick={() =>
-                  setItemsForCurrentLine(currentLineFilter.items.filter((x) => x !== it))
+                  startTransition(() =>
+                    setItemsForCurrentLine(currentLineFilter.items.filter((x) => x !== it))
+                  )
                 }
                 aria-label={`Remove item ${it}`}
               >
@@ -318,7 +353,7 @@ export const Filters: React.FC = () => {
           {activeFilterCount > 0 && (
             <button
               type="button"
-              onClick={resetFilters}
+              onClick={handleResetFilters}
               className="inline-flex items-center gap-1 rounded-xl border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-500/20 dark:text-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-500"
             >
               <RotateCcw className="h-3 w-3" />

@@ -1,10 +1,18 @@
-import React from 'react';
+import React, { useTransition } from 'react';
 import { FilterX, Navigation, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { DRILL_FIELD_LABEL } from '../lib/aggregate';
 import { useDashboardStore } from '../store/useDashboardStore';
 
 export const DrillChips: React.FC = () => {
-  const { drill, removeDrillChip, clearDrillChips } = useDashboardStore();
+  const [, startTransition] = useTransition();
+  const { drill, removeDrillChip, clearDrillChips } = useDashboardStore(
+    useShallow((s) => ({
+      drill: s.drill,
+      removeDrillChip: s.removeDrillChip,
+      clearDrillChips: s.clearDrillChips,
+    }))
+  );
   if (drill.length === 0) return null;
 
   return (
@@ -27,7 +35,7 @@ export const DrillChips: React.FC = () => {
               <span dir="auto">{chip.label}</span>
               <button
                 type="button"
-                onClick={() => removeDrillChip(idx)}
+                onClick={() => startTransition(() => removeDrillChip(idx))}
                 aria-label={`Remove ${chip.field} = ${chip.label} drill filter`}
                 className="rounded-full p-0.5 text-slate-400 hover:bg-rose-500/20 hover:text-rose-600 dark:hover:text-rose-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
               >
@@ -40,7 +48,7 @@ export const DrillChips: React.FC = () => {
 
       <button
         type="button"
-        onClick={clearDrillChips}
+        onClick={() => startTransition(() => clearDrillChips())}
         className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800"
       >
         <FilterX className="h-3.5 w-3.5" />
