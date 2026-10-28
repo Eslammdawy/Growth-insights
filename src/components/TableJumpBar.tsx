@@ -7,6 +7,8 @@ const JUMP_PILL_STYLE: Record<Level, string> = {
     'border-indigo-500/30 bg-indigo-500/10 text-indigo-800 hover:bg-indigo-600 hover:text-white dark:text-indigo-200 dark:hover:bg-indigo-600',
   distributor:
     'border-cyan-500/30 bg-cyan-500/10 text-cyan-800 hover:bg-cyan-600 hover:text-white dark:text-cyan-200 dark:hover:bg-cyan-600',
+  chain:
+    'border-purple-500/30 bg-purple-500/10 text-purple-800 hover:bg-purple-600 hover:text-white dark:text-purple-200 dark:hover:bg-purple-600',
   territory:
     'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-600 hover:text-white dark:text-emerald-200 dark:hover:bg-emerald-600',
   brick:
@@ -64,7 +66,7 @@ export const TableJumpBar: React.FC = () => {
         </div>
       </div>
       <span className="hidden rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 md:inline">
-        Visual insights + 4 levels stacked
+        Visual insights + 5 levels stacked
       </span>
     </nav>
   );

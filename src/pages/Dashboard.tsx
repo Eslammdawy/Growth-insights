@@ -235,7 +235,7 @@ export const Dashboard: React.FC = () => {
               {/* In-page jump bar */}
               <TableJumpBar />
 
-              {/* Stacked Level Tables: SubType, Distributor, Territory, Customer */}
+              {/* Stacked Level Tables: SubType, Distributor, Chains, Territory, Customer */}
               <div
                 className={`space-y-4 pt-1 transition-opacity duration-200 ${
                   analyzing ? 'pointer-events-none opacity-60' : 'opacity-100'

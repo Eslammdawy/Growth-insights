@@ -3,7 +3,7 @@
  */
 
 /** SubTypes whose rows can be expanded into a per-Chain breakdown on the SubType level. */
-export const EXPANDABLE_SUBTYPES: readonly string[] = ['Chain', 'Private'];
+export const EXPANDABLE_SUBTYPES: readonly string[] = ['Chain'];
 
 /** Distributors excluded from the Distributor level table (already represented in SubType). */
 export const EXCLUDED_DISTRIBUTORS: readonly string[] = ['Ezaby', 'Ezzaby'];

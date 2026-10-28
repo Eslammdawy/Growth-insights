@@ -8,7 +8,7 @@ import {
   encodeDataset,
   validateDataset,
 } from './columnar';
-import { EXPANDABLE_SUBTYPES, TX_TYPES, UNASSIGNED_CHAIN_LABEL } from './config';
+import { EXPANDABLE_SUBTYPES, TX_TYPES, UNASSIGNED_CHAIN_LABEL, UNASSIGNED_LABEL } from './config';
 import {
   AnalysisQuery,
   INSIGHT_LEVELS,
@@ -50,7 +50,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
   it('1. Sum of rows at every non-excluded level equals the grand total, and Distributor excludes Ezaby', () => {
     const res = analyze(sampleDs, baseQuery());
     expect(res.levels.distributor.find((r) => r.value.toLowerCase() === 'ezaby')).toBeUndefined();
-    for (const level of LEVELS.filter((l) => l !== 'distributor')) {
+    for (const level of LEVELS.filter((l) => l !== 'distributor' && l !== 'chain')) {
       const rows = res.levels[level];
       expect(rows.length).toBeGreaterThan(0);
       const summed = sumRows(rows);
@@ -67,9 +67,18 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
         expect(sumCells.delta).toBeCloseTo(totCells.delta, 6);
       }
     }
+
+    // Dedicated Chain level has only named chains and excludes unassigned
+    const chainRows = res.levels.chain;
+    expect(chainRows.length).toBeGreaterThan(0);
+    for (const r of chainRows) {
+      expect(r.value).toBeTruthy();
+      expect(r.label).not.toBe(UNASSIGNED_LABEL);
+      expect(r.label).not.toBe(UNASSIGNED_CHAIN_LABEL);
+    }
   });
 
-  it('2. Children of each expandable SubType (Chain, Private) sum to the parent row, including unassigned chain', () => {
+  it('2. Children of each expandable SubType (Chain) sum to the parent row', () => {
     const res = analyze(sampleDs, baseQuery());
     const subtypeRows = res.levels.subtype;
     for (const expSub of EXPANDABLE_SUBTYPES) {
@@ -83,8 +92,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       expect(childSum.cyV).toBeCloseTo(parent!.sums.cyV, 4);
     }
     const priv = subtypeRows.find((r) => r.value === 'Private')!;
-    const unassignedChild = priv.children!.find((c) => c.label === UNASSIGNED_CHAIN_LABEL);
-    expect(unassignedChild).toBeDefined();
+    expect(priv.children).toBeUndefined();
 
     // Ezzaby is NOT expandable per Q3 decision
     const ezzaby = subtypeRows.find((r) => r.value === 'Ezzaby');
@@ -193,7 +201,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       sampleDs,
       baseQuery({ line: targetLine, brands: [chosenBrand] }),
     );
-    for (const lvl of LEVELS.filter((l) => l !== 'distributor')) {
+    for (const lvl of LEVELS.filter((l) => l !== 'distributor' && l !== 'chain')) {
       const s = sumRows(r.levels[lvl]);
       expect(s.cyV).toBeCloseTo(r.totals.cyV, 5);
       expect(s.pyV).toBeCloseTo(r.totals.pyV, 5);

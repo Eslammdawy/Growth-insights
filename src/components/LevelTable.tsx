@@ -70,6 +70,12 @@ const LEVEL_THEME: Record<
     badge: 'from-cyan-600 to-blue-600',
     theadBg: 'from-cyan-100/95 via-sky-50/95 to-cyan-50/95 dark:from-slate-900/95 dark:via-cyan-950/90 dark:to-slate-900/95',
   },
+  chain: {
+    topBar: 'from-purple-500 via-pink-500 to-rose-500',
+    toolbarBg: 'from-purple-50/80 via-pink-50/40 to-white/90 dark:from-purple-950/50 dark:via-slate-900/90 dark:to-slate-900/90',
+    badge: 'from-purple-600 to-pink-600',
+    theadBg: 'from-purple-100/95 via-pink-50/95 to-purple-50/95 dark:from-slate-900/95 dark:via-purple-950/90 dark:to-slate-900/95',
+  },
   territory: {
     topBar: 'from-emerald-500 via-teal-500 to-cyan-500',
     toolbarBg: 'from-emerald-50/80 via-teal-50/40 to-white/90 dark:from-emerald-950/50 dark:via-slate-900/90 dark:to-slate-900/90',

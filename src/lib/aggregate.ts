@@ -42,17 +42,18 @@ import {
   yearOf,
 } from './periods';
 
-export type Level = 'subtype' | 'territory' | 'brick' | 'customer' | 'distributor';
+export type Level = 'subtype' | 'distributor' | 'chain' | 'territory' | 'brick' | 'customer';
 /** Display order of the level tables on the dashboard. */
-export const LEVELS: Level[] = ['subtype', 'distributor', 'territory', 'brick', 'customer'];
+export const LEVELS: Level[] = ['subtype', 'distributor', 'chain', 'territory', 'brick', 'customer'];
 /** Display order of the level tables rendered on the dashboard. */
-export const TABLE_LEVELS: Level[] = ['subtype', 'distributor', 'territory', 'customer'];
+export const TABLE_LEVELS: Level[] = ['subtype', 'distributor', 'chain', 'territory', 'customer'];
 export const LEVEL_LABEL: Record<Level, string> = {
   subtype: 'SubType',
+  distributor: 'Distributor',
+  chain: 'Chains',
   territory: 'Territory',
   brick: 'Brick',
   customer: 'Customer',
-  distributor: 'Distributor',
 };
 
 export type InsightLevel = 'subtype' | 'distributor' | 'territory' | 'brick' | 'item';
@@ -68,10 +69,11 @@ export const INSIGHT_LEVEL_LABEL: Record<InsightLevel, string> = {
 export type DrillField = 'SubType' | 'Chain' | 'Territory' | 'Brick' | 'CustomerID' | 'Distributor' | 'Item';
 export const LEVEL_FIELD: Record<Level, DrillField> = {
   subtype: 'SubType',
+  distributor: 'Distributor',
+  chain: 'Chain',
   territory: 'Territory',
   brick: 'Brick',
   customer: 'CustomerID',
-  distributor: 'Distributor',
 };
 export const DRILL_FIELD_LABEL: Record<DrillField, string> = {
   SubType: 'SubType',
@@ -708,10 +710,11 @@ const DRILL_COL: Record<DrillField, keyof Prepared['c']> = {
 };
 const LEVEL_COL: Record<Level, keyof Prepared['c']> = {
   subtype: 'subType',
+  distributor: 'distributor',
+  chain: 'chain',
   territory: 'territory',
   brick: 'brick',
   customer: 'customer',
-  distributor: 'distributor',
 };
 
 const sumsAt = (a: Float64Array, k: number): Sums => ({
@@ -1038,6 +1041,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
       if (!cnt[g]) continue;
       const value = col.dict[g];
       if (level === 'distributor' && excludedDistributors.has(value.trim().toLowerCase())) continue;
+      if (level === 'chain' && (!value || value.trim() === '' || value === UNASSIGNED_LABEL || value === UNASSIGNED_CHAIN_LABEL)) continue;
       const row: GroupRow = {
         id: `${field}:${value}`,
         field,
