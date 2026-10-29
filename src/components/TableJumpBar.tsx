@@ -47,6 +47,14 @@ export const TableJumpBar: React.FC = () => {
           </button>
           <button
             type="button"
+            onClick={() => scrollToElement('section-drivers')}
+            className="inline-flex items-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-1 font-bold text-emerald-800 shadow-sm transition-all hover:bg-emerald-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-emerald-200 dark:hover:bg-emerald-600"
+          >
+            <Compass className="h-3 w-3" />
+            Drivers
+          </button>
+          <button
+            type="button"
             onClick={() => scrollToElement('section-insights')}
             className="inline-flex items-center gap-1 rounded-xl border border-violet-500/35 bg-violet-500/10 px-3 py-1 font-bold text-violet-800 shadow-sm transition-all hover:bg-violet-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-violet-200 dark:hover:bg-violet-600"
           >
@@ -54,14 +62,24 @@ export const TableJumpBar: React.FC = () => {
             Insights
           </button>
           {TABLE_LEVELS.map((lvl) => (
-            <button
-              key={lvl}
-              type="button"
-              onClick={() => scrollToElement(`table-${lvl}`)}
-              className={`rounded-xl border px-3 py-1 font-bold shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${JUMP_PILL_STYLE[lvl]}`}
-            >
-              {LEVEL_LABEL[lvl]}
-            </button>
+            <React.Fragment key={lvl}>
+              {lvl === 'customer' && (
+                <button
+                  type="button"
+                  onClick={() => scrollToElement('section-customer-dynamics')}
+                  className="rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 px-3 py-1 font-bold text-fuchsia-800 shadow-sm transition-all hover:bg-fuchsia-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-fuchsia-200 dark:hover:bg-fuchsia-600"
+                >
+                  Customer Dynamics
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => scrollToElement(`table-${lvl}`)}
+                className={`rounded-xl border px-3 py-1 font-bold shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${JUMP_PILL_STYLE[lvl]}`}
+              >
+                {LEVEL_LABEL[lvl]}
+              </button>
+            </React.Fragment>
           ))}
         </div>
       </div>

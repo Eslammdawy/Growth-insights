@@ -22,14 +22,22 @@ import {
   sumRows,
 } from './aggregate';
 import {
+  CUSTOMER_SEGMENTS,
   METRICS,
+  classifyCustomerSegment,
+  computeCustomerInsightsForMetric,
+  contributionPp,
   decomposePriceVolume,
+  deriveReturnsSums,
   deriveRow,
   growth,
+  isReturnsFlagged,
   metricCells,
   priceVolumeRow,
+  returnsRatePct,
 } from './metrics';
 import { fmtGrowth, fmtPrice, fmtSignedPrice } from './format';
+import { DRIVER_LEVELS, buildHeadline, buildWaterfall, growthConcentration } from './insights';
 import { defaultSelection } from './periods';
 import { parseHashParams, serializeHashState, validateHashAgainstMeta } from './hashState';
 
@@ -608,5 +616,285 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       }),
     );
     expect(withItemDrill.totals.cyV).toBeLessThan(baseline.totals.cyV);
+  });
+
+  it('18. WI-2: Sum of LevelTable row Contrib. pp over any full level equals portfolio YoY Growth %', () => {
+    const res = analyze(sampleDs, baseQuery());
+    for (const m of METRICS) {
+      const kpi = deriveRow(res.totals, m);
+      const expectedPct = kpi.growth.kind === 'pct' ? kpi.growth.value * 100 : 0;
+      const totalPy = m === 'units' ? res.totals.pyQ : res.totals.pyV;
+
+      for (const lvl of LEVELS.filter((l) => l !== 'distributor' && l !== 'chain')) {
+        const rows = res.levels[lvl];
+        const sumPp = rows.reduce((acc, r) => {
+          const d = deriveRow(r.sums, m);
+          return acc + (contributionPp(d.delta, totalPy) ?? 0);
+        }, 0);
+        expect(sumPp).toBeCloseTo(expectedPct, 6);
+      }
+    }
+  });
+
+  it('19. WI-1: Headline builder handles all 6 cases (growth, decline, flat, new-only, lost-only, empty)', () => {
+    const period = { pyLabel: 'Q3-2025', cyLabel: 'Q3-2026' };
+    const topPos = { label: 'Cairo', delta: 420000, pp: 4.2 };
+    const topNeg = { label: 'Alex', delta: -180000, pp: -1.8 };
+
+    // 1. Growth
+    const hGrowth = buildHeadline(
+      'value',
+      { pyQ: 1000, pyV: 10_000_000, cyQ: 1200, cyV: 11_240_000 },
+      topPos,
+      topNeg,
+      period,
+    );
+    expect(hGrowth.kind).toBe('growth');
+    expect(hGrowth.text).toContain('Value grew +12.4%');
+    expect(hGrowth.text).toContain('Top driver: Cairo (+4.20%)');
+    expect(hGrowth.text).toContain('top detractor: Alex (−1.80%)');
+
+    // 2. Decline
+    const hDecline = buildHeadline(
+      'value',
+      { pyQ: 1000, pyV: 10_000_000, cyQ: 800, cyV: 8_500_000 },
+      topPos,
+      topNeg,
+      period,
+    );
+    expect(hDecline.kind).toBe('decline');
+    expect(hDecline.text).toContain('Value declined −15.0%');
+
+    // 3. Flat
+    const hFlat = buildHeadline(
+      'value',
+      { pyQ: 1000, pyV: 5_000_000, cyQ: 1000, cyV: 5_000_000 },
+      topPos,
+      topNeg,
+      period,
+    );
+    expect(hFlat.kind).toBe('flat');
+    expect(hFlat.text).toContain('held flat');
+
+    // 4. New-only
+    const hNew = buildHeadline(
+      'value',
+      { pyQ: 0, pyV: 0, cyQ: 500, cyV: 250_000 },
+      { label: 'New Dist', delta: 250_000, pp: null },
+      null,
+      period,
+    );
+    expect(hNew.kind).toBe('new-only');
+    expect(hNew.text).toContain('all-new business');
+    expect(hNew.text).toContain('New Dist');
+
+    // 5. Lost-only
+    const hLost = buildHeadline(
+      'value',
+      { pyQ: 500, pyV: 250_000, cyQ: 0, cyV: 0 },
+      null,
+      { label: 'Lost Dist', delta: -250_000, pp: -100 },
+      period,
+    );
+    expect(hLost.kind).toBe('lost-only');
+    expect(hLost.text).toContain('−100.0%');
+    expect(hLost.text).toContain('Lost Dist');
+
+    // 6. Empty
+    const hEmpty = buildHeadline(
+      'units',
+      { pyQ: 0, pyV: 0, cyQ: 0, cyV: 0 },
+      null,
+      null,
+      period,
+    );
+    expect(hEmpty.kind).toBe('empty');
+    expect(hEmpty.text).toContain('No units activity');
+  });
+
+  it('20. WI-1 & WI-3: Contribution waterfall satisfies exact PY + ΣΔ === CY across all driver levels, and concentration shares are in [0,1]', () => {
+    const res = analyze(sampleDs, baseQuery());
+    for (const m of METRICS) {
+      const pyTotal = m === 'units' ? res.totals.pyQ : res.totals.pyV;
+      const cyTotal = m === 'units' ? res.totals.cyQ : res.totals.cyV;
+
+      for (const lvl of DRIVER_LEVELS) {
+        const rows = res.insights.byLevel[lvl];
+        const wf = buildWaterfall(rows, res.totals, m, res.period);
+        expect(wf[0].kind).toBe('py');
+        expect(wf[0].delta).toBeCloseTo(pyTotal, 5);
+        expect(wf[wf.length - 1].kind).toBe('cy');
+        expect(wf[wf.length - 1].delta).toBeCloseTo(cyTotal, 5);
+
+        const stepDeltas = wf
+          .filter((s) => s.kind !== 'py' && s.kind !== 'cy')
+          .reduce((acc, s) => acc + s.delta, 0);
+        expect(pyTotal + stepDeltas).toBeCloseTo(cyTotal, 5);
+
+        const conc = growthConcentration(rows, m);
+        if (conc.topPosShare1 !== null) {
+          expect(conc.topPosShare1).toBeGreaterThanOrEqual(0);
+          expect(conc.topPosShare1).toBeLessThanOrEqual(1 + 1e-9);
+        }
+        if (conc.topPosShare5 !== null) {
+          expect(conc.topPosShare5).toBeGreaterThanOrEqual(conc.topPosShare1 ?? 0);
+          expect(conc.topPosShare5).toBeLessThanOrEqual(1 + 1e-9);
+        }
+      }
+    }
+
+    // Crafted concentration checks: single contributor -> share 1 & dominance true; symmetric -> 0.5 & dominance false
+    const makeRow = (id: string, delta: number) => ({
+      id,
+      field: 'Territory' as const,
+      value: id,
+      label: id,
+      sums: { pyQ: 100, pyV: 1000, cyQ: 100 + delta, cyV: 1000 + delta },
+      unitsDelta: delta,
+      valueDelta: delta,
+      unitsGrowth: growth(100, 100 + delta),
+      valueGrowth: growth(1000, 1000 + delta),
+      unitsShareCy: 0.5,
+      valueShareCy: 0.5,
+      unitsContribPp: delta / 10,
+      valueContribPp: delta / 10,
+      pvm: priceVolumeRow({ pyQ: 100, pyV: 1000, cyQ: 100 + delta, cyV: 1000 + delta }, 1000),
+    });
+
+    const singleConc = growthConcentration([makeRow('OnlyOne', 500), makeRow('Loser', -100)], 'value');
+    expect(singleConc.topPosShare1).toBeCloseTo(1, 6);
+    expect(singleConc.topNegShare1).toBeCloseTo(1, 6);
+    expect(singleConc.dominance).toBe(true);
+
+    const symConc = growthConcentration([makeRow('A', 300), makeRow('B', 300)], 'value');
+    expect(symConc.topPosShare1).toBeCloseTo(0.5, 6);
+    expect(symConc.topPosShare5).toBeCloseTo(1.0, 6);
+    expect(symConc.dominance).toBe(false);
+  });
+
+  it('21. WI-4: Customer segments partition the customer base and satisfy NRR, GRR, Churn, and NewRate identities', () => {
+    const res = analyze(sampleDs, baseQuery());
+    const custRows = res.levels.customer;
+    expect(custRows.length).toBeGreaterThan(0);
+
+    for (const m of METRICS) {
+      const ci = res.customerInsights.byMetric[m];
+
+      // 1. Segment counts sum to total customers with any activity; every customer in exactly one segment
+      const sumSegCounts = CUSTOMER_SEGMENTS.reduce((acc, s) => acc + ci.segments[s].count, 0);
+      expect(sumSegCounts).toBe(custRows.length);
+
+      for (const r of custRows) {
+        const matchedSegments = CUSTOMER_SEGMENTS.filter(
+          (seg) => classifyCustomerSegment(r.sums, m) === seg,
+        );
+        expect(matchedSegments.length).toBe(1);
+      }
+
+      // 2. Identities: NRR + NewRate ≈ 1 + g; GRR <= NRR; GRR + ContractionRate + Churn ≈ 1
+      const totalCells = deriveRow(sumRows(custRows), m);
+      expect(totalCells.growth.kind).toBe('pct');
+      const g = (totalCells.growth as { kind: 'pct'; value: number }).value;
+      expect((ci.nrr ?? 0) + (ci.newRate ?? 0)).toBeCloseTo(1 + g, 6);
+      expect(ci.grr!).toBeLessThanOrEqual(ci.nrr! + 1e-9);
+      expect((ci.grr ?? 0) + (ci.contractionRate ?? 0) + (ci.churnRate ?? 0)).toBeCloseTo(1, 6);
+    }
+
+    // 3. Hand-computed fixture check on edge-cases.json:
+    // In edge-cases.json (LFL on, Jul 2025 vs Jul 2026):
+    // C-100: PY=5000, CY=9000 (retained, growing, expansion=+4000, contraction=0)
+    // C-200: PY=0, CY=4000 (new)
+    // C-300: PY=8000, CY=0 (lost)
+    // C-400: PY=0, CY=0 (stable)
+    // PY_active = 5000 + 8000 = 13000; Retained CY = 9000; New CY = 4000; Lost PY = 8000; Contraction = 0
+    // Expected: NRR = 9000 / 13000; GRR = 5000 / 13000; Churn = 8000 / 13000; NewRate = 4000 / 13000
+    // Notice Contraction = 0 here, so GRR + Churn = 5000/13000 + 8000/13000 = 1.0 literally!
+    const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
+    const edgeMeta = buildMeta(edgeDs);
+    const edgeRes = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability) }));
+    const eci = edgeRes.customerInsights;
+    expect(eci.nrr).toBeCloseTo(9000 / 13000, 6);
+    expect(eci.grr).toBeCloseTo(5000 / 13000, 6);
+    expect(eci.churnRate).toBeCloseTo(8000 / 13000, 6);
+    expect(eci.newRate).toBeCloseTo(4000 / 13000, 6);
+    expect((eci.grr ?? 0) + (eci.churnRate ?? 0)).toBeCloseTo(1, 6);
+    expect((eci.nrr ?? 0) + (eci.newRate ?? 0)).toBeCloseTo(1 + 0, 6); // total g = 0 (13000 -> 13000)
+
+    // 4. Lost-only fixture and New-only fixture
+    const lostOnlyCi = computeCustomerInsightsForMetric(
+      [{ sums: { pyQ: 50, pyV: 5000, cyQ: 0, cyV: 0 } }],
+      'value',
+    );
+    expect(lostOnlyCi.segments.lost.count).toBe(1);
+    expect(lostOnlyCi.nrr).toBeCloseTo(0, 6);
+    expect(lostOnlyCi.grr).toBeCloseTo(0, 6);
+    expect(lostOnlyCi.churnRate).toBeCloseTo(1, 6);
+    expect(lostOnlyCi.newRate).toBeCloseTo(0, 6);
+    expect((lostOnlyCi.grr ?? 0) + (lostOnlyCi.churnRate ?? 0)).toBeCloseTo(1, 6);
+
+    const newOnlyCi = computeCustomerInsightsForMetric(
+      [{ sums: { pyQ: 0, pyV: 0, cyQ: 40, cyV: 4000 } }],
+      'value',
+    );
+    expect(newOnlyCi.segments.new.count).toBe(1);
+    expect(newOnlyCi.nrr).toBeNull();
+    expect(newOnlyCi.grr).toBeNull();
+    expect(newOnlyCi.churnRate).toBeNull();
+    expect(newOnlyCi.newRate).toBeNull();
+  });
+
+  it('22. WI-5: Gross + Returns === Net for every group and total across Sales-only, Returns-only, and combined fixtures', () => {
+    const resBoth = analyze(sampleDs, baseQuery());
+    const resSalesOnly = analyze(sampleDs, baseQuery({ txTypes: ['Sales'] }));
+    const resReturnsOnly = analyze(sampleDs, baseQuery({ txTypes: ['Return Sales'] }));
+
+    for (const res of [resBoth, resSalesOnly, resReturnsOnly]) {
+      const totRet = deriveReturnsSums(res.totals, res.grossTotals);
+      expect(res.grossTotals.pyQ + totRet.pyQ).toBeCloseTo(res.totals.pyQ, 6);
+      expect(res.grossTotals.pyV + totRet.pyV).toBeCloseTo(res.totals.pyV, 4);
+      expect(res.grossTotals.cyQ + totRet.cyQ).toBeCloseTo(res.totals.cyQ, 6);
+      expect(res.grossTotals.cyV + totRet.cyV).toBeCloseTo(res.totals.cyV, 4);
+
+      for (const lvl of LEVELS) {
+        for (const r of res.levels[lvl]) {
+          expect(r.gross).toBeDefined();
+          const ret = deriveReturnsSums(r.sums, r.gross!);
+          expect(r.gross!.pyQ + ret.pyQ).toBeCloseTo(r.sums.pyQ, 6);
+          expect(r.gross!.pyV + ret.pyV).toBeCloseTo(r.sums.pyV, 4);
+          expect(r.gross!.cyQ + ret.cyQ).toBeCloseTo(r.sums.cyQ, 6);
+          expect(r.gross!.cyV + ret.cyV).toBeCloseTo(r.sums.cyV, 4);
+        }
+      }
+    }
+
+    // In Sales-only, gross === net (returns = 0)
+    expect(resSalesOnly.grossTotals.cyV).toBeCloseTo(resSalesOnly.totals.cyV, 4);
+    // In Returns-only, gross === 0
+    expect(resReturnsOnly.grossTotals.cyV).toBe(0);
+
+    // Hand-computed portfolio returns rate & flag check:
+    // Suppose Gross = 50,000 EGP, Return Sales = -2,500 EGP -> Net = 47,500 EGP -> Returns Rate = 2500 / 50000 * 100 = 5.0%
+    expect(returnsRatePct(47500, 50000)).toBeCloseTo(5.0, 6);
+    // Flagged when row rate > 1.5 * portfolio rate (e.g. > 7.5%) AND gross >= 10,000 EGP
+    expect(isReturnsFlagged(18000, 20000, 5.0)).toBe(true); // 10% > 7.5% and gross 20,000 >= 10,000
+    expect(isReturnsFlagged(4500, 5000, 5.0)).toBe(false); // 10% > 7.5% but gross 5,000 < 10,000 floor
+  });
+
+  it('23. WI-6: Sum of Territory × Month pp-mode cells over all territories and months equals portfolio YoY %', () => {
+    const res = analyze(sampleDs, baseQuery());
+    for (const m of METRICS) {
+      const totalPy = m === 'units' ? res.totals.pyQ : res.totals.pyV;
+      const kpi = deriveRow(res.totals, m);
+      const expectedPp = kpi.growth.kind === 'pct' ? kpi.growth.value * 100 : 0;
+
+      let sumCellPp = 0;
+      for (const tm of res.territoryMonths) {
+        for (const mo of tm.months) {
+          const cells = metricCells(mo.sums, m);
+          sumCellPp += contributionPp(cells.delta, totalPy) ?? 0;
+        }
+      }
+      expect(sumCellPp).toBeCloseTo(expectedPp, 6);
+    }
   });
 });

@@ -1,6 +1,9 @@
-import { DatasetMeta, DrillChip, brandOptions, itemOptions, subTypeOptions } from './aggregate';
+import { DatasetMeta, DrillChip, InsightLevel, brandOptions, itemOptions, subTypeOptions } from './aggregate';
 import { METRICS, Metric } from './metrics';
 import { PeriodSelection, quarterMonths } from './periods';
+
+export type HeatmapMode = 'yoy' | 'pp';
+const VALID_DRIVER_LEVELS: readonly InsightLevel[] = ['subtype', 'distributor', 'territory', 'item'];
 
 export interface ParsedHashState {
   metric?: Metric;
@@ -17,6 +20,9 @@ export interface ParsedHashState {
   territories?: string[];
   txTypes?: ('Sales' | 'Return Sales')[];
   drill?: DrillChip[];
+  driverLevel?: InsightLevel;
+  showReturns?: boolean;
+  heatmapMode?: HeatmapMode;
 }
 
 export function parseHashParams(hashString: string): ParsedHashState {
@@ -112,6 +118,21 @@ export function parseHashParams(hashString: string): ParsedHashState {
     }
   }
 
+  if (params.has('dlv')) {
+    const dlv = params.get('dlv') as InsightLevel;
+    if (VALID_DRIVER_LEVELS.includes(dlv)) out.driverLevel = dlv;
+  }
+
+  if (params.has('ret')) {
+    const ret = params.get('ret');
+    out.showReturns = ret === '1' || ret === 'true';
+  }
+
+  if (params.has('hmm')) {
+    const hmm = params.get('hmm');
+    if (hmm === 'yoy' || hmm === 'pp') out.heatmapMode = hmm;
+  }
+
   return out;
 }
 
@@ -131,6 +152,9 @@ export function validateHashAgainstMeta(
   brands: string[];
   items: string[];
   drill: DrillChip[];
+  driverLevel?: InsightLevel;
+  showReturns?: boolean;
+  heatmapMode?: HeatmapMode;
 } {
   const line = parsed.line && meta.lines.includes(parsed.line) ? parsed.line : null;
 
@@ -208,6 +232,9 @@ export function validateHashAgainstMeta(
     brands,
     items,
     drill,
+    driverLevel: parsed.driverLevel,
+    showReturns: parsed.showReturns,
+    heatmapMode: parsed.heatmapMode,
   };
 }
 
@@ -223,6 +250,9 @@ export function serializeHashState(state: {
   brands?: string[];
   items?: string[];
   drill: DrillChip[];
+  driverLevel?: InsightLevel;
+  showReturns?: boolean;
+  heatmapMode?: HeatmapMode;
 }): string {
   const params = new URLSearchParams();
   if (state.metric) params.set('metric', state.metric);
@@ -258,6 +288,15 @@ export function serializeHashState(state: {
   }
   if (state.drill && state.drill.length > 0) {
     params.set('drill', JSON.stringify(state.drill));
+  }
+  if (state.driverLevel && state.driverLevel !== 'subtype') {
+    params.set('dlv', state.driverLevel);
+  }
+  if (state.showReturns) {
+    params.set('ret', '1');
+  }
+  if (state.heatmapMode && state.heatmapMode !== 'yoy') {
+    params.set('hmm', state.heatmapMode);
   }
   return '#' + params.toString();
 }

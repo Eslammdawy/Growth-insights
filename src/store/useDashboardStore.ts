@@ -10,6 +10,7 @@ import {
   DatasetMeta,
   DrillChip,
   GroupRow,
+  InsightLevel,
   ItemTarget,
   Level,
   itemOptions,
@@ -22,13 +23,14 @@ import { ParseProgress } from '../lib/parse';
 import { PeriodSelection, defaultSelection } from '../lib/periods';
 import { workerClient } from '../workers/workerClient';
 import {
+  HeatmapMode,
   parseHashParams,
   validateHashAgainstMeta,
   serializeHashState,
   getHashSnapshot,
 } from '../lib/hashState';
 
-export type StatusFilter = 'all' | 'growing' | 'declining' | 'new' | 'lost';
+export type StatusFilter = 'all' | 'growing' | 'stable' | 'declining' | 'new' | 'lost';
 
 export interface LoadErrorState {
   message: string;
@@ -53,6 +55,9 @@ function syncHashToUrl(st: DashboardState) {
     brands: st.brands,
     items: st.items,
     drill: st.drill,
+    driverLevel: st.driverLevel,
+    showReturns: st.showReturns,
+    heatmapMode: st.heatmapMode,
   });
   if (window.location.hash !== next) {
     window.history.replaceState(null, '', next);
@@ -93,6 +98,10 @@ export interface DashboardState {
   // Chart & UI state
   chartMode: 'delta' | 'growth';
   chartLevel: Level;
+  driverLevel: InsightLevel;
+  showReturns: boolean;
+  heatmapMode: HeatmapMode;
+  customerStatusFilter: StatusFilter;
   theme: 'light' | 'dark';
 
   // Actions
@@ -114,6 +123,10 @@ export interface DashboardState {
   resetFilters: () => void;
   setChartMode: (m: 'delta' | 'growth') => void;
   setChartLevel: (l: Level) => void;
+  setDriverLevel: (l: InsightLevel) => void;
+  setShowReturns: (show: boolean) => void;
+  setHeatmapMode: (m: HeatmapMode) => void;
+  setCustomerStatusFilter: (s: StatusFilter) => void;
   toggleTheme: () => void;
   syncFromHash: (hashString?: string) => void;
 }
@@ -161,6 +174,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   chartMode: 'delta',
   chartLevel: 'subtype',
+  driverLevel: initialHash.driverLevel ?? 'subtype',
+  showReturns: initialHash.showReturns ?? false,
+  heatmapMode: initialHash.heatmapMode ?? 'yoy',
+  customerStatusFilter: 'all',
   theme: getInitialTheme(),
 
   loadSampleData: async () => {
@@ -185,6 +202,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         brands: v.brands,
         items: v.items,
         drill: v.drill,
+        driverLevel: v.driverLevel ?? get().driverLevel,
+        showReturns: v.showReturns ?? get().showReturns,
+        heatmapMode: v.heatmapMode ?? get().heatmapMode,
         loading: false,
         progress: null,
       });
@@ -347,6 +367,19 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   setChartMode: (chartMode) => set({ chartMode }),
   setChartLevel: (chartLevel) => set({ chartLevel }),
+  setDriverLevel: (driverLevel) => {
+    set({ driverLevel });
+    syncHashToUrl(get());
+  },
+  setShowReturns: (showReturns) => {
+    set({ showReturns });
+    syncHashToUrl(get());
+  },
+  setHeatmapMode: (heatmapMode) => {
+    set({ heatmapMode });
+    syncHashToUrl(get());
+  },
+  setCustomerStatusFilter: (customerStatusFilter) => set({ customerStatusFilter }),
 
   toggleTheme: () => {
     const next = get().theme === 'dark' ? 'light' : 'dark';
@@ -371,6 +404,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       brands: v.brands,
       items: v.items,
       drill: v.drill,
+      driverLevel: v.driverLevel ?? st.driverLevel,
+      showReturns: v.showReturns ?? st.showReturns,
+      heatmapMode: v.heatmapMode ?? st.heatmapMode,
     });
     void get().refreshAnalysis();
   },

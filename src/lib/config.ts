@@ -81,3 +81,10 @@ export const UNASSIGNED_CHAIN_LABEL = '(Unassigned / Independent)';
 
 /** Values with an absolute magnitude below this are treated as zero (floating-point noise). */
 export const EPSILON = 1e-9;
+
+export const GROWTH_BAND = 0.05;          // ±5% stable band for customer segments
+export const WATERFALL_TOP_N = 8;         // individual bars each side of the waterfall
+export const PARETO_TOP_N = 10;
+export const RETURNS_FLAG_FACTOR = 1.5;   // > 1.5× portfolio rate flags a row
+export const RETURNS_MIN_GROSS = 10_000;  // EGP gross floor before flagging
+

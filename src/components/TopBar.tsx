@@ -55,6 +55,11 @@ export const TopBar: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Brand & Period Banner */}
         <div className="flex flex-wrap items-center gap-3">
+          <img
+            src={`${import.meta.env.BASE_URL}hpg-logo.jpg`}
+            alt="HPG - Hefny Pharma Group"
+            className="-my-2 h-12 w-auto shrink-0 rounded-md bg-white object-contain p-0.5 shadow-sm ring-1 ring-indigo-200/60 dark:ring-slate-700/80 sm:h-[52px]"
+          />
           <div>
             <div className="flex items-center gap-2">
               <span className="bg-gradient-to-r from-indigo-700 via-violet-600 to-cyan-600 bg-clip-text text-base font-extrabold tracking-tight text-transparent dark:from-indigo-300 dark:via-violet-300 dark:to-cyan-300">

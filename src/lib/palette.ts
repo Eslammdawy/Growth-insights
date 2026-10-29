@@ -166,3 +166,55 @@ export function treemapFillColor(g: Growth, isDark: boolean): { fill: string; st
     };
   }
 }
+
+/**
+ * Diverging color scale for Territory × Month Δ contribution (pp) mode (WI-6).
+ * Uses the shared `down` → neutral → `up` tokens scaled against `maxAbsPp`.
+ */
+export function contribPpScaleStyle(
+  pp: number | null,
+  maxAbsPp: number,
+  isDark: boolean,
+): CellColorStyle {
+  if (pp === null || !Number.isFinite(pp) || Math.abs(pp) < 1e-6) {
+    return {
+      backgroundColor: isDark ? 'rgba(51, 65, 85, 0.35)' : 'rgba(241, 245, 249, 0.85)',
+      borderColor: isDark ? 'rgba(71, 85, 105, 0.45)' : 'rgba(203, 213, 225, 0.7)',
+      color: isDark ? '#94a3b8' : '#64748b',
+    };
+  }
+
+  const denom = Math.max(0.5, maxAbsPp);
+  const mag = Math.min(1, Math.abs(pp) / denom);
+  const alpha = isDark ? 0.18 + mag * 0.55 : 0.12 + mag * 0.58;
+  const borderAlpha = isDark ? 0.35 + mag * 0.45 : 0.25 + mag * 0.45;
+
+  if (pp > 0) {
+    const highContrastText = isDark
+      ? mag > 0.45
+        ? '#ecfdf5'
+        : '#6ee7b7'
+      : mag > 0.55
+        ? '#ffffff'
+        : '#064e3b';
+    return {
+      backgroundColor: `color-mix(in srgb, var(--color-up) ${Math.round(alpha * 100)}%, ${isDark ? '#0f172a' : '#ffffff'})`,
+      borderColor: `color-mix(in srgb, var(--color-up-light) ${Math.round(borderAlpha * 100)}%, transparent)`,
+      color: highContrastText,
+    };
+  } else {
+    const highContrastText = isDark
+      ? mag > 0.45
+        ? '#fff1f2'
+        : '#fda4af'
+      : mag > 0.55
+        ? '#ffffff'
+        : '#881337';
+    return {
+      backgroundColor: `color-mix(in srgb, var(--color-down) ${Math.round(alpha * 100)}%, ${isDark ? '#0f172a' : '#ffffff'})`,
+      borderColor: `color-mix(in srgb, var(--color-down-light) ${Math.round(borderAlpha * 100)}%, transparent)`,
+      color: highContrastText,
+    };
+  }
+}
+

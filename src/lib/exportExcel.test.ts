@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
-import { exportLevelTableToExcel, ExportableRowItem } from './exportExcel';
+import {
+  ExportableRowItem,
+  exportDefectorWatchlistToExcel,
+  exportLevelTableToExcel,
+} from './exportExcel';
 import { DerivedRow } from './metrics';
 
 describe('exportLevelTableToExcel', () => {
@@ -91,12 +95,15 @@ describe('exportLevelTableToExcel', () => {
         'CY (Q3-2026) [EGP]',
         'YoY Growth [EGP]',
         'YoY Growth %',
+        'Contrib. %',
         'Status',
       ]);
       expect(data[1][0]).toBe('C001');
       expect(data[1][1]).toBe('Customer Alpha');
+      expect(data[1][8]).toBeCloseTo(30, 5);
       expect(data[2][0]).toBe('C002');
       expect(data[2][1]).toBe('Customer Beta');
+      expect(data[2][8]).toBeCloseTo(20, 5);
       // Total row
       const totalRow = data[3];
       expect(totalRow[1]).toBe('Total (2 customers)');
@@ -104,7 +111,8 @@ describe('exportLevelTableToExcel', () => {
       expect(totalRow[5]).toBe(150000);
       expect(totalRow[6]).toBe(50000);
       expect(totalRow[7]).toBe(0.5);
-      expect(totalRow[8]).toBe('Growing');
+      expect(totalRow[8]).toBeCloseTo(50, 5);
+      expect(totalRow[9]).toBe('Growing');
     } finally {
       appendSheetSpy.mockRestore();
     }
@@ -211,6 +219,7 @@ describe('exportLevelTableToExcel', () => {
         'CY (Q3-2026) [Units]',
         'YoY Growth [Units]',
         'YoY Growth %',
+        'Contrib. %',
         'Status',
       ]);
       expect(data[1][0]).toBe('Chain');
@@ -220,6 +229,104 @@ describe('exportLevelTableToExcel', () => {
       expect(data[3][0]).toBe('    Panadol Extra');
       expect(data[3][1]).toBe('Item');
       expect(data[3][2]).toBe('Panadol');
+    } finally {
+      appendSheetSpy.mockRestore();
+    }
+  });
+
+  it('includes Gross, Returns, and Returns % columns when showReturns is enabled (WI-5) and exports Defector Watchlist (WI-4)', () => {
+    const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
+    try {
+      const total: DerivedRow = {
+        py: 100000,
+        cy: 90000,
+        delta: -10000,
+        growth: { kind: 'pct', value: -0.1 },
+        growthNum: -0.1,
+        status: 'declining',
+      };
+      exportLevelTableToExcel({
+        level: 'territory',
+        label: 'Territory',
+        rows: [
+          {
+            kind: 'row',
+            row: {
+              id: 'terr-cairo',
+              field: 'Territory',
+              value: 'Cairo',
+              label: 'Cairo',
+              sums: { pyQ: 100, pyV: 100000, cyQ: 90, cyV: 90000 },
+              gross: { pyQ: 100, pyV: 100000, cyQ: 100, cyV: 100000 },
+              rowCount: 2,
+            },
+            d: total,
+            depth: 0,
+          },
+        ],
+        total,
+        totalCount: 1,
+        period: { pyLabel: 'Q3-2025', cyLabel: 'Q3-2026' },
+        metric: 'value',
+        showReturns: true,
+        tableGrossTotals: { pyQ: 100, pyV: 100000, cyQ: 100, cyV: 100000 },
+      });
+
+      const [, wsReturns] = appendSheetSpy.mock.calls[appendSheetSpy.mock.calls.length - 1];
+      const dataReturns = XLSX.utils.sheet_to_json(wsReturns, { header: 1 }) as (string | number)[][];
+      expect(dataReturns[0]).toContain('CY Gross [EGP]');
+      expect(dataReturns[0]).toContain('CY Returns [EGP]');
+      expect(dataReturns[0]).toContain('Returns %');
+
+      // Watchlist export
+      exportDefectorWatchlistToExcel({
+        customers: [
+          {
+            row: {
+              id: 'cust-lost',
+              field: 'CustomerID',
+              value: 'C-300',
+              label: 'Lost Pharmacy',
+              customerId: 'C-300',
+              brick: 'Alex',
+              subType: 'Private',
+              sums: { pyQ: 80, pyV: 80000, cyQ: 0, cyV: 0 },
+              rowCount: 1,
+            },
+            pyVal: 80000,
+            contribPp: -8.0,
+            items: [
+              {
+                id: 'item-1',
+                field: 'Item',
+                value: 'Item A',
+                label: 'Item A',
+                brand: 'Brand A',
+                sums: { pyQ: 80, pyV: 80000, cyQ: 0, cyV: 0 },
+                rowCount: 1,
+              },
+            ],
+          },
+        ],
+        period: { pyLabel: 'Q3-2025', cyLabel: 'Q3-2026' },
+        metric: 'value',
+      });
+
+      const [, wsWatch, sheetWatch] = appendSheetSpy.mock.calls[appendSheetSpy.mock.calls.length - 1];
+      expect(sheetWatch).toBe('Defector Watchlist');
+      const dataWatch = XLSX.utils.sheet_to_json(wsWatch, { header: 1 }) as (string | number)[][];
+      expect(dataWatch[0]).toEqual([
+        'Customer ID',
+        'Customer Name / Item',
+        'Brick (CY)',
+        'SubType',
+        'Type',
+        'Brand',
+        'PY Lost (Q3-2025) [EGP]',
+        'Contrib. %',
+      ]);
+      expect(dataWatch[1][1]).toBe('Lost Pharmacy');
+      expect(dataWatch[2][1]).toBe('  Item A');
     } finally {
       appendSheetSpy.mockRestore();
     }

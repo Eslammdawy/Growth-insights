@@ -3,7 +3,7 @@
  * Contribution-to-Growth (pp), and Price / Volume / Mix decomposition (Phase 4).
  * All functions are pure and operate on aggregated sums only.
  */
-import { EPSILON } from './config';
+import { EPSILON, GROWTH_BAND, RETURNS_FLAG_FACTOR, RETURNS_MIN_GROSS } from './config';
 
 export type Metric = 'units' | 'value';
 export const METRICS: Metric[] = ['units', 'value'];
@@ -275,3 +275,201 @@ export function decomposePriceVolume(rows: Sums[], total?: Sums): PriceVolumeSum
     totalGrowthPp: contributionPp(totalDeltaV, agg.pyV),
   };
 }
+
+// ---------------------------------------------------------------------------------------------
+// WI-4: Customer Lifecycle Segments & Retention Metrics
+// ---------------------------------------------------------------------------------------------
+
+export type CustomerSegment = 'new' | 'growing' | 'stable' | 'declining' | 'lost';
+export const CUSTOMER_SEGMENTS: CustomerSegment[] = ['new', 'growing', 'stable', 'declining', 'lost'];
+
+export const CUSTOMER_SEGMENT_LABEL: Record<CustomerSegment, string> = {
+  new: 'New',
+  growing: 'Growing',
+  stable: 'Stable (±5%)',
+  declining: 'Declining',
+  lost: 'Lost (−100%)',
+};
+
+export interface CustomerSegmentStats {
+  count: number;
+  sums: Sums;
+}
+
+export interface CustomerInsightsByMetric {
+  segments: Record<CustomerSegment, CustomerSegmentStats>;
+  active: { pyCount: number; cyCount: number; bothCount: number; totalCount: number };
+  nrr: number | null;
+  grr: number | null;
+  churnRate: number | null;
+  contractionRate: number | null;
+  expansionRate: number | null;
+  newRate: number | null;
+  avgPerActive: { py: number | null; cy: number | null };
+}
+
+export interface CustomerInsights extends CustomerInsightsByMetric {
+  byMetric: Record<Metric, CustomerInsightsByMetric>;
+}
+
+/**
+ * Classifies a customer's Sums into one of the 5 lifecycle segments on the given metric basis:
+ * - New: PY = 0, CY ≠ 0
+ * - Lost: PY ≠ 0, CY = 0
+ * - Growing: PY ≠ 0, CY ≠ 0, (CY − PY) / |PY| > GROWTH_BAND (+5%)
+ * - Declining: PY ≠ 0, CY ≠ 0, (CY − PY) / |PY| < −GROWTH_BAND (−5%)
+ * - Stable: |(CY − PY) / |PY|| ≤ GROWTH_BAND (including 0 → 0)
+ */
+export function classifyCustomerSegment(sums: Sums, metric: Metric): CustomerSegment {
+  const { py, cy } = metricPair(sums, metric);
+  const pyZ = isZero(py);
+  const cyZ = isZero(cy);
+  if (pyZ && !cyZ) return 'new';
+  if (!pyZ && cyZ) return 'lost';
+  if (pyZ && cyZ) return 'stable';
+  const rel = (cy - py) / Math.abs(py);
+  if (rel > GROWTH_BAND) return 'growing';
+  if (rel < -GROWTH_BAND) return 'declining';
+  return 'stable';
+}
+
+export function computeCustomerInsightsForMetric(
+  customerRows: { sums: Sums }[],
+  metric: Metric,
+): CustomerInsightsByMetric {
+  const segments: Record<CustomerSegment, CustomerSegmentStats> = {
+    new: { count: 0, sums: emptySums() },
+    growing: { count: 0, sums: emptySums() },
+    stable: { count: 0, sums: emptySums() },
+    declining: { count: 0, sums: emptySums() },
+    lost: { count: 0, sums: emptySums() },
+  };
+
+  let pyCount = 0;
+  let cyCount = 0;
+  let bothCount = 0;
+
+  let retainedPy = 0;
+  let retainedCy = 0;
+  let expansion = 0;
+  let contraction = 0; // negative or 0
+  let lostPy = 0;
+  let newCy = 0;
+  let totalPy = 0;
+  let totalCy = 0;
+
+  for (const r of customerRows) {
+    const seg = classifyCustomerSegment(r.sums, metric);
+    segments[seg].count++;
+    addSums(segments[seg].sums, r.sums);
+
+    const { py, cy } = metricPair(r.sums, metric);
+    totalPy += py;
+    totalCy += cy;
+
+    const pyActive = !isZero(py) && py > 0;
+    const cyActive = !isZero(cy) && cy > 0;
+    if (pyActive) pyCount++;
+    if (cyActive) cyCount++;
+    if (pyActive && cyActive) bothCount++;
+
+    const pyNonZero = !isZero(py);
+    const cyNonZero = !isZero(cy);
+    if (pyNonZero && cyNonZero) {
+      retainedPy += py;
+      retainedCy += cy;
+      const d = cy - py;
+      if (d > 0) expansion += d;
+      else contraction += d;
+    } else if (pyNonZero && !cyNonZero) {
+      lostPy += py;
+    } else if (!pyNonZero && cyNonZero) {
+      newCy += cy;
+    }
+  }
+
+  const pyActiveBase = retainedPy + lostPy;
+  const hasPyBase = !isZero(pyActiveBase);
+  const absPyBase = Math.abs(pyActiveBase);
+
+  const nrr = hasPyBase ? retainedCy / absPyBase : null;
+  const grr = hasPyBase ? (retainedPy + contraction) / absPyBase : null;
+  const churnRate = hasPyBase ? lostPy / absPyBase : null;
+  const contractionRate = hasPyBase ? -contraction / absPyBase : null;
+  const expansionRate = hasPyBase ? expansion / absPyBase : null;
+  const newRate = hasPyBase ? newCy / absPyBase : null;
+
+  return {
+    segments,
+    active: {
+      pyCount,
+      cyCount,
+      bothCount,
+      totalCount: customerRows.length,
+    },
+    nrr,
+    grr,
+    churnRate,
+    contractionRate,
+    expansionRate,
+    newRate,
+    avgPerActive: {
+      py: pyCount > 0 ? totalPy / pyCount : null,
+      cy: cyCount > 0 ? totalCy / cyCount : null,
+    },
+  };
+}
+
+export function computeCustomerInsights(customerRows: { sums: Sums }[]): CustomerInsights {
+  const byValue = computeCustomerInsightsForMetric(customerRows, 'value');
+  const byUnits = computeCustomerInsightsForMetric(customerRows, 'units');
+  return {
+    ...byValue,
+    byMetric: {
+      value: byValue,
+      units: byUnits,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// WI-5: Gross vs. Returns & Returns-Rate Helpers
+// ---------------------------------------------------------------------------------------------
+
+/** Derives Return Sales sums from Net and Gross (`returns = net − gross`, so `gross + returns === net`). */
+export function deriveReturnsSums(net: Sums, gross: Sums): Sums {
+  return {
+    pyQ: net.pyQ - gross.pyQ,
+    pyV: net.pyV - gross.pyV,
+    cyQ: net.cyQ - gross.cyQ,
+    cyV: net.cyV - gross.cyV,
+  };
+}
+
+/**
+ * Returns Rate in percentage (`(−Returns) / Gross × 100`).
+ * Returns `null` when `Gross ≤ 0`.
+ */
+export function returnsRatePct(netVal: number, grossVal: number): number | null {
+  if (isZero(grossVal) || grossVal <= 0) return null;
+  const returnsVal = netVal - grossVal; // negative when returns occurred
+  const rate = (-returnsVal / grossVal) * 100;
+  return Object.is(rate, -0) || Math.abs(rate) < 1e-9 ? 0 : rate;
+}
+
+/**
+ * Flags a row when its CY Returns Rate exceeds `RETURNS_FLAG_FACTOR × portfolioRatePct`
+ * AND its CY Gross Value meets the `RETURNS_MIN_GROSS` (10,000 EGP) floor.
+ */
+export function isReturnsFlagged(
+  rowNetCyV: number,
+  rowGrossCyV: number,
+  portfolioRatePct: number | null,
+): boolean {
+  if (portfolioRatePct === null || portfolioRatePct <= 0) return false;
+  if (rowGrossCyV < RETURNS_MIN_GROSS) return false;
+  const rowRate = returnsRatePct(rowNetCyV, rowGrossCyV);
+  if (rowRate === null) return false;
+  return rowRate > RETURNS_FLAG_FACTOR * portfolioRatePct;
+}
+

@@ -65,7 +65,7 @@ export function fmtPct(x: number | null | undefined, signed = false): string {
 export function fmtPp(x: number | null | undefined): string {
   if (x === null || x === undefined || !Number.isFinite(x)) return DASH;
   const v = clean(x);
-  const s = `${nf2.format(Math.abs(v))} pp`;
+  const s = `${nf2.format(Math.abs(v))}%`;
   return v > 0 ? `+${s}` : v < 0 ? `−${s}` : s;
 }
 

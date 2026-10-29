@@ -19,17 +19,35 @@ import {
 import { useShallow } from 'zustand/react/shallow';
 import { DrillChip, GroupRow, ItemTarget, LEVEL_LABEL, Level, sumRows } from '../lib/aggregate';
 import { exportLevelTableToExcel } from '../lib/exportExcel';
-import { fmtGrowth, fmtMetric, fmtSigned } from '../lib/format';
-import { DerivedRow, Metric, deriveRow } from '../lib/metrics';
+import { fmtGrowth, fmtMetric, fmtPct, fmtPp, fmtSigned } from '../lib/format';
+import {
+  DerivedRow,
+  Metric,
+  classifyCustomerSegment,
+  contributionPp,
+  deriveRow,
+  emptySums,
+  isReturnsFlagged,
+  returnsRatePct,
+} from '../lib/metrics';
 import { StatusFilter, useDashboardStore } from '../store/useDashboardStore';
 
-type SortId = 'label' | 'py' | 'cy' | 'delta' | 'growth';
+type SortId = 'label' | 'py' | 'cy' | 'delta' | 'growth' | 'contrib' | 'returns';
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All rows' },
   { value: 'growing', label: 'Growing' },
   { value: 'declining', label: 'Declining' },
   { value: 'new', label: 'New' },
+  { value: 'lost', label: 'Lost (−100%)' },
+];
+
+const CUSTOMER_STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All segments' },
+  { value: 'new', label: 'New' },
+  { value: 'growing', label: 'Growing (>+5%)' },
+  { value: 'stable', label: 'Stable (±5%)' },
+  { value: 'declining', label: 'Declining (<−5%)' },
   { value: 'lost', label: 'Lost (−100%)' },
 ];
 
@@ -108,7 +126,7 @@ function OthersBadge({ others, fieldName }: { others?: string[]; fieldName: stri
   );
 }
 
-function sortValue(r: { row: GroupRow; d: DerivedRow }, id: SortId): number | string {
+function sortValue(r: { row: GroupRow; d: DerivedRow }, id: SortId, totalPy: number): number | string {
   switch (id) {
     case 'label':
       return r.row.label;
@@ -120,14 +138,22 @@ function sortValue(r: { row: GroupRow; d: DerivedRow }, id: SortId): number | st
       return r.d.delta;
     case 'growth':
       return r.d.growth.kind === 'new' ? Infinity : r.d.growth.kind === 'none' ? -Infinity : r.d.growth.value;
+    case 'contrib': {
+      const pp = contributionPp(r.d.delta, totalPy);
+      return pp !== null ? pp : r.d.delta;
+    }
+    case 'returns': {
+      const rate = r.row.gross ? returnsRatePct(r.row.sums.cyV, r.row.gross.cyV) : null;
+      return rate !== null ? rate : -Infinity;
+    }
   }
 }
 
-function sortList<T extends { row: GroupRow; d: DerivedRow }>(list: T[], id: SortId, desc: boolean): T[] {
+function sortList<T extends { row: GroupRow; d: DerivedRow }>(list: T[], id: SortId, desc: boolean, totalPy: number): T[] {
   const dir = desc ? -1 : 1;
   return [...list].sort((a, b) => {
-    const va = sortValue(a, id);
-    const vb = sortValue(b, id);
+    const va = sortValue(a, id, totalPy);
+    const vb = sortValue(b, id, totalPy);
     if (typeof va === 'string' || typeof vb === 'string') return dir * String(va).localeCompare(String(vb));
     return va === vb ? 0 : va > vb ? dir : -dir;
   });
@@ -140,6 +166,9 @@ interface LevelTableRowProps {
   metric: Metric;
   colCount: number;
   maxMag: number;
+  totalPy: number;
+  showReturns: boolean;
+  portfolioReturnsRatePct: number | null;
   itemsOpen: boolean;
   chainsOpen: boolean;
   onToggle: (key: string, target?: ItemTarget) => void;
@@ -153,6 +182,9 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
   metric,
   colCount,
   maxMag,
+  totalPy,
+  showReturns,
+  portfolioReturnsRatePct,
   itemsOpen,
   chainsOpen,
   onToggle,
@@ -193,6 +225,8 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
       ? 'text-rose-600 dark:text-rose-400'
       : 'text-slate-500';
   const barWidth = Math.min(100, Math.round((Math.abs(d.delta) / maxMag) * 100));
+  const contribPp = contributionPp(d.delta, totalPy);
+  const contribHalfWidth = Math.min(50, Math.round((Math.abs(d.delta) / maxMag) * 50));
 
   return (
     <tr
@@ -355,6 +389,60 @@ export const LevelTableRow = React.memo<LevelTableRowProps>(function LevelTableR
           </div>
         </div>
       </td>
+      <td className="px-3 py-1.5">
+        <div className="flex flex-col items-end gap-1">
+          <span className={`text-[11px] font-bold tabular-nums ${tone}`}>
+            {fmtPp(contribPp)}
+          </span>
+          <div className="relative h-1.5 w-20 overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-800">
+            <div className="absolute inset-y-0 left-1/2 w-px bg-slate-400/60 dark:bg-slate-600" />
+            {contribHalfWidth > 0 && (
+              <div
+                style={
+                  d.delta >= 0
+                    ? { left: '50%', width: `${contribHalfWidth}%` }
+                    : { right: '50%', width: `${contribHalfWidth}%` }
+                }
+                className={`absolute inset-y-0 rounded-full ${
+                  d.delta >= 0
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                    : 'bg-gradient-to-l from-rose-500 to-orange-500'
+                }`}
+              />
+            )}
+          </div>
+        </div>
+      </td>
+      {showReturns && (
+        <td className="px-3 py-1.5 text-right tabular-nums">
+          {(() => {
+            const retPct = r.gross ? returnsRatePct(r.sums.cyV, r.gross.cyV) : null;
+            const flagged = r.gross
+              ? isReturnsFlagged(r.sums.cyV, r.gross.cyV, portfolioReturnsRatePct)
+              : false;
+            return (
+              <div className="inline-flex items-center justify-end gap-1.5">
+                {flagged && (
+                  <span
+                    title="Elevated returns: row returns rate exceeds 1.5× portfolio rate with CY Gross ≥ 10,000 EGP"
+                    aria-label="Elevated returns warning"
+                    className="h-2 w-2 shrink-0 rounded-full bg-rose-500 ring-2 ring-rose-500/35"
+                  />
+                )}
+                <span
+                  className={
+                    flagged
+                      ? 'font-bold text-rose-600 dark:text-rose-400'
+                      : 'font-medium text-slate-600 dark:text-slate-300'
+                  }
+                >
+                  {retPct !== null ? fmtPct(retPct / 100) : '–'}
+                </span>
+              </div>
+            );
+          })()}
+        </td>
+      )}
     </tr>
   );
 });
@@ -366,12 +454,32 @@ interface LevelTableProps {
 export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   const [, startTransition] = useTransition();
 
-  const { rows, period, totals, metric, itemsByRow, fetchItems, addDrillRow } = useDashboardStore(
+  const {
+    rows,
+    period,
+    totals,
+    grossTotals,
+    metric,
+    txTypes,
+    showReturns,
+    setShowReturns,
+    customerStatusFilter,
+    setCustomerStatusFilter,
+    itemsByRow,
+    fetchItems,
+    addDrillRow,
+  } = useDashboardStore(
     useShallow((s) => ({
       rows: s.result?.levels[level],
       period: s.result?.period,
       totals: s.result?.totals,
+      grossTotals: s.result?.grossTotals,
       metric: s.metric,
+      txTypes: s.txTypes,
+      showReturns: s.showReturns,
+      setShowReturns: s.setShowReturns,
+      customerStatusFilter: s.customerStatusFilter,
+      setCustomerStatusFilter: s.setCustomerStatusFilter,
       itemsByRow: s.itemsByRow,
       fetchItems: s.fetchItems,
       addDrillRow: s.addDrillRow,
@@ -381,7 +489,9 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   const [sort, setSort] = useState<{ id: SortId; desc: boolean }>({ id: 'delta', desc: true });
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
-  const [status, setStatus] = useState<StatusFilter>('all');
+  const [localStatus, setLocalStatus] = useState<StatusFilter>('all');
+  const status = level === 'customer' ? customerStatusFilter : localStatus;
+  const setStatus = level === 'customer' ? setCustomerStatusFilter : setLocalStatus;
   const [topN, setTopN] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = useState(false);
@@ -389,6 +499,11 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   const targets = useRef(new Map<string, ItemTarget>());
 
   const rowList = rows ?? [];
+  const totalPy = totals ? (metric === 'units' ? totals.pyQ : totals.pyV) : 0;
+  const bothTxTypes = txTypes.includes('Sales') && txTypes.includes('Return Sales');
+  const effectiveShowReturns = showReturns && bothTxTypes;
+  const portfolioReturnsRatePct =
+    bothTxTypes && totals && grossTotals ? returnsRatePct(totals.cyV, grossTotals.cyV) : null;
 
   // Re-fetch item breakdowns of expanded rows after the analysis was refreshed (filters changed).
   useEffect(() => {
@@ -436,7 +551,13 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   const topRows = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
     let list = rowList.map((row) => ({ row, d: deriveRow(row.sums, metric) }));
-    if (status !== 'all') list = list.filter((x) => x.d.status === status);
+    if (status !== 'all') {
+      if (level === 'customer') {
+        list = list.filter((x) => classifyCustomerSegment(x.row.sums, metric) === status);
+      } else {
+        list = list.filter((x) => x.d.status === status);
+      }
+    }
     if (q) {
       list = list.filter(({ row: r }) =>
         [r.label, r.customerId, r.brick, r.territory, r.subType, ...(r.children?.map((c) => c.label) ?? [])].some(
@@ -445,11 +566,11 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
       );
     }
     if (topN) {
-      const byDelta = sortList(list, 'delta', true);
+      const byDelta = sortList(list, 'delta', true, totalPy);
       list = topN > 0 ? byDelta.slice(0, topN) : byDelta.slice(topN).reverse();
     }
-    return sortList(list, sort.id, sort.desc);
-  }, [rowList, metric, status, deferredSearch, topN, sort]);
+    return sortList(list, sort.id, sort.desc, totalPy);
+  }, [rowList, metric, status, level, deferredSearch, topN, sort, totalPy]);
 
   const maxMag = useMemo(() => {
     let m = 0;
@@ -479,6 +600,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
           entry.map((row) => ({ row, d: deriveRow(row.sums, metric) })),
           sort.id,
           sort.desc,
+          totalPy,
         );
         for (const it of items) out.push({ kind: 'item', key: it.row.id, row: it.row, d: it.d, depth });
       }
@@ -493,6 +615,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
           r.children.map((row) => ({ row, d: deriveRow(row.sums, metric) })),
           sort.id,
           sort.desc,
+          totalPy,
         );
         for (const ch of chains) {
           const ct: ItemTarget = { level: 'subtype', value: r.value, chain: ch.row.value };
@@ -502,7 +625,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
       }
     }
     return out;
-  }, [topRows, expanded, itemsByRow, metric, sort, level, fetchItems]);
+  }, [topRows, expanded, itemsByRow, metric, sort, level, fetchItems, totalPy]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -513,19 +636,35 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   });
 
   const tableTotals = useMemo(() => sumRows(rowList), [rowList]);
+  const tableGrossTotals = useMemo(() => {
+    const s = emptySums();
+    for (const r of rowList) {
+      if (r.gross) {
+        s.pyQ += r.gross.pyQ;
+        s.pyV += r.gross.pyV;
+        s.cyQ += r.gross.cyQ;
+        s.cyV += r.gross.cyV;
+      }
+    }
+    return s;
+  }, [rowList]);
 
   if (!rows || !period || !totals) return null;
 
   const extraCols = level === 'customer' ? 2 : level === 'brick' ? 1 : 0;
-  const colCount = 5 + extraCols;
+  const colCount = 6 + extraCols + (effectiveShowReturns ? 1 : 0);
   const total = deriveRow(tableTotals, metric);
+  const totalContribPp = contributionPp(total.delta, totalPy);
+  const totalReturnsPct = returnsRatePct(tableTotals.cyV, tableGrossTotals.cyV);
+  const isPartialLevel = level === 'distributor' || level === 'chain';
   const label = LEVEL_LABEL[level];
   const themeStyle = LEVEL_THEME[level];
   const totalUp = total.status === 'growing' || total.status === 'new';
   const totalDown = total.status === 'declining' || total.status === 'lost';
+  const statusOptions = level === 'customer' ? CUSTOMER_STATUS_OPTIONS : STATUS_OPTIONS;
 
   const handleExportExcel = useCallback(() => {
-    if (!rows || !period) return;
+    if (!rows || !period || !totals) return;
     setExporting(true);
     try {
       exportLevelTableToExcel({
@@ -536,13 +675,16 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
         totalCount: rowList.length,
         period,
         metric,
+        portfolioTotals: totals,
+        showReturns: effectiveShowReturns,
+        tableGrossTotals,
       });
     } catch (err) {
       console.error('Failed to export table to Excel:', err);
     } finally {
       setExporting(false);
     }
-  }, [rows, period, level, label, flat, total, rowList.length, metric]);
+  }, [rows, period, totals, level, label, flat, total, rowList.length, metric, effectiveShowReturns, tableGrossTotals]);
 
   const headerCell = (id: SortId, text: string, align: 'left' | 'right' = 'right') => {
     const isSorted = sort.id === id;
@@ -645,7 +787,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                 aria-label={`${label} growth status filter`}
                 className="rounded-xl border border-indigo-200/80 bg-white/85 px-2.5 py-1 text-xs font-semibold text-slate-700 focus:border-indigo-500 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-200"
               >
-                {STATUS_OPTIONS.map((o) => (
+                {statusOptions.map((o) => (
                   <option key={o.value} value={o.value} className="bg-white dark:bg-slate-900">
                     {o.label}
                   </option>
@@ -663,6 +805,21 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                   </option>
                 ))}
               </select>
+              {bothTxTypes && (
+                <button
+                  type="button"
+                  onClick={() => setShowReturns(!showReturns)}
+                  aria-pressed={showReturns}
+                  title="Toggle Returns % column (persisted in URL hash)"
+                  className={`rounded-xl border px-2.5 py-1 text-xs font-semibold transition-all ${
+                    showReturns
+                      ? 'border-rose-500/50 bg-rose-500/15 text-rose-800 dark:text-rose-200'
+                      : 'border-indigo-200/80 bg-white/85 text-slate-700 hover:bg-indigo-50 dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-200'
+                  }`}
+                >
+                  Show returns
+                </button>
+              )}
               {expanded.size > 0 && (
                 <button
                   type="button"
@@ -712,6 +869,8 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                 {headerCell('cy', `CY (${period.cyLabel})`)}
                 {headerCell('delta', 'YoY Growth')}
                 {headerCell('growth', 'YoY Growth %')}
+                {headerCell('contrib', 'Contrib. %')}
+                {effectiveShowReturns && headerCell('returns', 'Returns %')}
               </tr>
             </thead>
             <tbody className="divide-y divide-indigo-100/70 dark:divide-slate-800/70">
@@ -739,6 +898,9 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                       metric={metric}
                       colCount={colCount}
                       maxMag={maxMag}
+                      totalPy={totalPy}
+                      showReturns={effectiveShowReturns}
+                      portfolioReturnsRatePct={portfolioReturnsRatePct}
                       itemsOpen={false}
                       chainsOpen={false}
                       onToggle={toggle}
@@ -761,6 +923,9 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                     metric={metric}
                     colCount={colCount}
                     maxMag={maxMag}
+                    totalPy={totalPy}
+                    showReturns={effectiveShowReturns}
+                    portfolioReturnsRatePct={portfolioReturnsRatePct}
                     itemsOpen={itemsOpen}
                     chainsOpen={chainsOpen}
                     onToggle={toggle}
@@ -802,6 +967,25 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                     {fmtGrowth(total.growth)}
                   </span>
                 </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  <div className="flex flex-col items-end">
+                    <span
+                      className={`text-xs font-extrabold ${
+                        totalUp ? 'text-emerald-300' : totalDown ? 'text-rose-300' : 'text-slate-200'
+                      }`}
+                    >
+                      {fmtPp(totalContribPp)}
+                    </span>
+                    <span className="text-[10px] font-medium text-indigo-200/80">
+                      {isPartialLevel ? 'of portfolio YoY %' : '= portfolio YoY %'}
+                    </span>
+                  </div>
+                </td>
+                {effectiveShowReturns && (
+                  <td className="px-3 py-2.5 text-right tabular-nums text-rose-200">
+                    {totalReturnsPct !== null ? fmtPct(totalReturnsPct / 100) : '–'}
+                  </td>
+                )}
               </tr>
             </tfoot>
           </table>

@@ -12,6 +12,9 @@ import { LEVEL_LABEL, TABLE_LEVELS } from '../lib/aggregate';
 import { getHashSnapshot, subscribeHash } from '../lib/hashState';
 import { useDashboardStore } from '../store/useDashboardStore';
 
+const GrowthDrivers = React.lazy(() =>
+  import('../components/GrowthDrivers').then((m) => ({ default: m.GrowthDrivers }))
+);
 const MonthChart = React.lazy(() =>
   import('../components/MonthChart').then((m) => ({ default: m.MonthChart }))
 );
@@ -23,6 +26,9 @@ const BubbleScatterChart = React.lazy(() =>
 );
 const CyTreemap = React.lazy(() =>
   import('../components/CyTreemap').then((m) => ({ default: m.CyTreemap }))
+);
+const CustomerDynamics = React.lazy(() =>
+  import('../components/CustomerDynamics').then((m) => ({ default: m.CustomerDynamics }))
 );
 
 function ChartSkeleton() {
@@ -155,6 +161,13 @@ export const Dashboard: React.FC = () => {
               <DrillChips />
               <KpiCards />
 
+              {/* Growth Drivers Story Section (WI-1 & WI-3) */}
+              <ErrorBoundary title="Growth Drivers">
+                <Suspense fallback={<ChartSkeleton />}>
+                  <GrowthDrivers />
+                </Suspense>
+              </ErrorBoundary>
+
               {/* Primary Charts Row: Composed Monthly Trend + Top N YoY Growth Chart */}
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <ErrorBoundary title="Monthly Trend Chart">
@@ -215,7 +228,7 @@ export const Dashboard: React.FC = () => {
                       analyzing ? 'pointer-events-none opacity-60' : 'opacity-100'
                     }`}
                   >
-                    {/* Bubble Scatter + CY Value Treemap */}
+                    {/* Row 1: Bubble Scatter + CY Value Treemap */}
                     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                       <ErrorBoundary title="PY vs YoY % Bubble Scatter">
                         <Suspense fallback={<ChartSkeleton />}>
@@ -235,16 +248,25 @@ export const Dashboard: React.FC = () => {
               {/* In-page jump bar */}
               <TableJumpBar />
 
-              {/* Stacked Level Tables: SubType, Distributor, Chains, Territory, Customer */}
+              {/* Stacked Level Tables: SubType, Distributor, Chains, Territory, Customer (+ CustomerDynamics above Customer) */}
               <div
                 className={`space-y-4 pt-1 transition-opacity duration-200 ${
                   analyzing ? 'pointer-events-none opacity-60' : 'opacity-100'
                 }`}
               >
                 {TABLE_LEVELS.map((lvl) => (
-                  <ErrorBoundary key={lvl} title={`${LEVEL_LABEL[lvl]} Level Table`}>
-                    <LevelTable level={lvl} />
-                  </ErrorBoundary>
+                  <React.Fragment key={lvl}>
+                    {lvl === 'customer' && (
+                      <ErrorBoundary title="Customer Dynamics">
+                        <Suspense fallback={<ChartSkeleton />}>
+                          <CustomerDynamics />
+                        </Suspense>
+                      </ErrorBoundary>
+                    )}
+                    <ErrorBoundary title={`${LEVEL_LABEL[lvl]} Level Table`}>
+                      <LevelTable level={lvl} />
+                    </ErrorBoundary>
+                  </React.Fragment>
                 ))}
               </div>
             </>

@@ -21,10 +21,12 @@ import {
 } from './config';
 import { Dataset, StrColumn, numCol, strCol } from './columnar';
 import {
+  CustomerInsights,
   Growth,
   PriceVolumeRow,
   PriceVolumeSummary,
   Sums,
+  computeCustomerInsights,
   contributionPp,
   decomposePriceVolume,
   emptySums,
@@ -121,6 +123,8 @@ export interface GroupRow {
   value: string;
   label: string;
   sums: Sums;
+  /** Gross Sales sums (Sales rows only; returns = sums − gross). */
+  gross?: Sums;
   rowCount: number;
   /** SubType rows of expandable SubTypes: per-Chain breakdown (sums add up to the parent). */
   children?: GroupRow[];
@@ -189,11 +193,15 @@ export interface AnalysisInsights {
 export interface AnalysisResult {
   period: ResolvedPeriod;
   totals: Sums;
+  /** Portfolio Gross Sales sums (Sales rows only; returns = totals − grossTotals). */
+  grossTotals: Sums;
   months: MonthPoint[];
   /** Territory × Month sums for the YoY % heatmap. */
   territoryMonths: TerritoryMonthRow[];
   /** Phase 4 contribution-to-growth and price/volume decomposition results. */
   insights: AnalysisInsights;
+  /** WI-4 customer lifecycle segments, active base, and retention metrics. */
+  customerInsights: CustomerInsights;
   /** One table per level. */
   levels: Record<Level, GroupRow[]>;
   /** Cascading filter options guided by upstream filter selections. */
@@ -815,6 +823,7 @@ interface LevelAcc {
   level: Level;
   col: StrColumn;
   acc: Float64Array;
+  grossAcc: Float64Array;
   cnt: Int32Array;
 }
 
@@ -869,6 +878,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const terrMonthAcc = new Float64Array(nTerr * 13 * 4);
   const nItem = c.item.dict.length;
   const itemAcc = new Float64Array(nItem * 4);
+  const itemGrossAcc = new Float64Array(nItem * 4);
   const itemCnt = new Int32Array(nItem);
 
   const mtUsed = new Uint8Array(c.mainType.dict.length);
@@ -880,9 +890,16 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
 
   const levelAccs: LevelAcc[] = LEVELS.map((level) => {
     const col = c[LEVEL_COL[level]];
-    return { level, col, acc: new Float64Array(col.dict.length * 4), cnt: new Int32Array(col.dict.length) };
+    return {
+      level,
+      col,
+      acc: new Float64Array(col.dict.length * 4),
+      grossAcc: new Float64Array(col.dict.length * 4),
+      cnt: new Int32Array(col.dict.length),
+    };
   });
   const totals = emptySums();
+  const grossTotals = emptySums();
   let matched = 0;
 
   // SubType → Chain children
@@ -890,6 +907,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const ex = new Set(EXPANDABLE_SUBTYPES);
   c.subType.dict.forEach((s, k) => (expandable[k] = ex.has(s) ? 1 : 0));
   const childAcc = new Map<number, Float64Array>();
+  const childGrossAcc = new Map<number, Float64Array>();
   const childCnt = new Map<number, Int32Array>();
   const chainCodes = c.chain.codes;
   const subCodes = c.subType.codes;
@@ -956,12 +974,21 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     if (itemMask && !itemMask[it]) continue;
 
     matched++;
+    const isSales = tx[i] === 1;
     if (f === 2) {
       totals.cyQ += q;
       totals.cyV += v;
+      if (isSales) {
+        grossTotals.cyQ += q;
+        grossTotals.cyV += v;
+      }
     } else {
       totals.pyQ += q;
       totals.pyV += v;
+      if (isSales) {
+        grossTotals.pyQ += q;
+        grossTotals.pyV += v;
+      }
     }
     const m = monthOfP[pk];
     monthAcc[m * 4 + off] += q;
@@ -973,6 +1000,10 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
 
     itemAcc[it * 4 + off] += q;
     itemAcc[it * 4 + off + 1] += v;
+    if (isSales) {
+      itemGrossAcc[it * 4 + off] += q;
+      itemGrossAcc[it * 4 + off + 1] += v;
+    }
     itemCnt[it]++;
 
     for (let j = 0; j < nl; j++) {
@@ -980,6 +1011,10 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
       const g = la.col.codes[i];
       la.acc[g * 4 + off] += q;
       la.acc[g * 4 + off + 1] += v;
+      if (isSales) {
+        la.grossAcc[g * 4 + off] += q;
+        la.grossAcc[g * 4 + off + 1] += v;
+      }
       la.cnt[g]++;
     }
     if (expandable[sg]) {
@@ -987,11 +1022,17 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
       if (!ca) {
         ca = new Float64Array(nChain * 4);
         childAcc.set(sg, ca);
+        childGrossAcc.set(sg, new Float64Array(nChain * 4));
         childCnt.set(sg, new Int32Array(nChain));
       }
       const ch = chainCodes[i];
       ca[ch * 4 + off] += q;
       ca[ch * 4 + off + 1] += v;
+      if (isSales) {
+        const cga = childGrossAcc.get(sg)!;
+        cga[ch * 4 + off] += q;
+        cga[ch * 4 + off + 1] += v;
+      }
       childCnt.get(sg)![ch]++;
     }
     const bg = brickCodes[i];
@@ -1034,7 +1075,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     items: collectOpts(c.item, itemUsed, query.items),
   };
   const levels = {} as Record<Level, GroupRow[]>;
-  for (const { level, col, acc, cnt } of levelAccs) {
+  for (const { level, col, acc, grossAcc, cnt } of levelAccs) {
     const field = LEVEL_FIELD[level];
     const rowsOut: GroupRow[] = [];
     for (let g = 0; g < col.dict.length; g++) {
@@ -1048,10 +1089,12 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
         value,
         label: value || UNASSIGNED_LABEL,
         sums: sumsAt(acc, g),
+        gross: sumsAt(grossAcc, g),
         rowCount: cnt[g],
       };
       if (level === 'subtype' && expandable[g] && childAcc.has(g)) {
         const ca = childAcc.get(g)!;
+        const cga = childGrossAcc.get(g)!;
         const cc = childCnt.get(g)!;
         row.children = [];
         for (let k = 0; k < nChain; k++) {
@@ -1063,6 +1106,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
             value: cv,
             label: cv || UNASSIGNED_CHAIN_LABEL,
             sums: sumsAt(ca, k),
+            gross: sumsAt(cga, k),
             rowCount: cc[k],
             parentValue: value,
           });
@@ -1124,6 +1168,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
       value: name,
       label: name || UNASSIGNED_LABEL,
       sums: sumsAt(itemAcc, k),
+      gross: sumsAt(itemGrossAcc, k),
       rowCount: itemCnt[k],
       brand: b >= 0 ? c.brand.dict[b] : undefined,
     });
@@ -1132,7 +1177,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const distTotals = sumRows(levels.distributor);
   const byLevel: Record<InsightLevel, ContributionRow[]> = {
     subtype: levels.subtype.map((r) => toContributionRow(r, totals)),
-    distributor: levels.distributor.map((r) => toContributionRow(r, distTotals)),
+    distributor: levels.distributor.map((r) => toContributionRow(r, totals)),
     territory: levels.territory.map((r) => toContributionRow(r, totals)),
     brick: levels.brick.map((r) => toContributionRow(r, totals)),
     item: itemRows.map((r) => toContributionRow(r, totals)),
@@ -1187,12 +1232,16 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     sums: sumsAt(monthAcc, m),
   }));
 
+  const customerInsights = computeCustomerInsights(levels.customer);
+
   return {
     period,
     totals,
+    grossTotals,
     months,
     territoryMonths,
     insights,
+    customerInsights,
     levels,
     filterOptions,
     lines,
@@ -1219,6 +1268,7 @@ export function analyzeItems(ds: Dataset, query: AnalysisQuery, target: ItemTarg
   const nm = masks.length;
   const nItem = c.item.dict.length;
   const acc = new Float64Array(nItem * 4);
+  const grossAcc = new Float64Array(nItem * 4);
   const cnt = new Int32Array(nItem);
   const { qty, val, tx, periodIdx } = p;
   const gcodes = groupCol.codes;
@@ -1234,8 +1284,14 @@ export function analyzeItems(ds: Dataset, query: AnalysisQuery, target: ItemTarg
     for (let j = 0; j < nm; j++) if (!masks[j][1][masks[j][0][i]]) continue rows;
     const off = f === 2 ? 2 : 0;
     const it = itemCodes[i];
-    acc[it * 4 + off] += qty[i];
-    acc[it * 4 + off + 1] += val[i];
+    const q = qty[i];
+    const v = val[i];
+    acc[it * 4 + off] += q;
+    acc[it * 4 + off + 1] += v;
+    if (tx[i] === 1) {
+      grossAcc[it * 4 + off] += q;
+      grossAcc[it * 4 + off + 1] += v;
+    }
     cnt[it]++;
   }
 
@@ -1254,6 +1310,7 @@ export function analyzeItems(ds: Dataset, query: AnalysisQuery, target: ItemTarg
       value: name,
       label: name || UNASSIGNED_LABEL,
       sums: sumsAt(acc, k),
+      gross: sumsAt(grossAcc, k),
       rowCount: cnt[k],
       brand: b >= 0 ? c.brand.dict[b] : undefined,
     });
