@@ -305,6 +305,10 @@ export interface CustomerInsightsByMetric {
   contractionRate: number | null;
   expansionRate: number | null;
   newRate: number | null;
+  retainedGrowthShare: number | null;
+  newGrowthShare: number | null;
+  retainedDelta: number;
+  newDelta: number;
   avgPerActive: { py: number | null; cy: number | null };
 }
 
@@ -399,6 +403,11 @@ export function computeCustomerInsightsForMetric(
   const expansionRate = hasPyBase ? expansion / absPyBase : null;
   const newRate = hasPyBase ? newCy / absPyBase : null;
 
+  const retainedGrowthShare = nrr !== null ? nrr - 1 : null;
+  const newGrowthShare = newRate;
+  const retainedDelta = retainedCy - pyActiveBase;
+  const newDelta = newCy;
+
   return {
     segments,
     active: {
@@ -413,6 +422,10 @@ export function computeCustomerInsightsForMetric(
     contractionRate,
     expansionRate,
     newRate,
+    retainedGrowthShare,
+    newGrowthShare,
+    retainedDelta,
+    newDelta,
     avgPerActive: {
       py: pyCount > 0 ? totalPy / pyCount : null,
       cy: cyCount > 0 ? totalCy / cyCount : null,

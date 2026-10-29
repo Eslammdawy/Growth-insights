@@ -791,11 +791,15 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
         expect(matchedSegments.length).toBe(1);
       }
 
-      // 2. Identities: NRR + NewRate ≈ 1 + g; GRR <= NRR; GRR + ContractionRate + Churn ≈ 1
+      // 2. Identities: NRR + NewRate ≈ 1 + g; RetainedGrowthShare + NewGrowthShare ≈ g; GRR <= NRR; GRR + ContractionRate + Churn ≈ 1
       const totalCells = deriveRow(sumRows(custRows), m);
       expect(totalCells.growth.kind).toBe('pct');
       const g = (totalCells.growth as { kind: 'pct'; value: number }).value;
       expect((ci.nrr ?? 0) + (ci.newRate ?? 0)).toBeCloseTo(1 + g, 6);
+      expect((ci.retainedGrowthShare ?? 0) + (ci.newGrowthShare ?? 0)).toBeCloseTo(g, 6);
+      expect(ci.retainedGrowthShare).toBeCloseTo((ci.nrr ?? 0) - 1, 6);
+      expect(ci.newGrowthShare).toBeCloseTo(ci.newRate ?? 0, 6);
+      expect(ci.retainedDelta + ci.newDelta).toBeCloseTo(totalCells.delta, 6);
       expect(ci.grr!).toBeLessThanOrEqual(ci.nrr! + 1e-9);
       expect((ci.grr ?? 0) + (ci.contractionRate ?? 0) + (ci.churnRate ?? 0)).toBeCloseTo(1, 6);
     }
@@ -817,6 +821,11 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(eci.grr).toBeCloseTo(5000 / 13000, 6);
     expect(eci.churnRate).toBeCloseTo(8000 / 13000, 6);
     expect(eci.newRate).toBeCloseTo(4000 / 13000, 6);
+    expect(eci.retainedGrowthShare).toBeCloseTo((9000 - 13000) / 13000, 6);
+    expect(eci.newGrowthShare).toBeCloseTo(4000 / 13000, 6);
+    expect((eci.retainedGrowthShare ?? 0) + (eci.newGrowthShare ?? 0)).toBeCloseTo(0, 6);
+    expect(eci.retainedDelta).toBe(9000 - 13000);
+    expect(eci.newDelta).toBe(4000);
     expect((eci.grr ?? 0) + (eci.churnRate ?? 0)).toBeCloseTo(1, 6);
     expect((eci.nrr ?? 0) + (eci.newRate ?? 0)).toBeCloseTo(1 + 0, 6); // total g = 0 (13000 -> 13000)
 
@@ -830,6 +839,8 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(lostOnlyCi.grr).toBeCloseTo(0, 6);
     expect(lostOnlyCi.churnRate).toBeCloseTo(1, 6);
     expect(lostOnlyCi.newRate).toBeCloseTo(0, 6);
+    expect(lostOnlyCi.retainedGrowthShare).toBeCloseTo(-1, 6);
+    expect(lostOnlyCi.newGrowthShare).toBeCloseTo(0, 6);
     expect((lostOnlyCi.grr ?? 0) + (lostOnlyCi.churnRate ?? 0)).toBeCloseTo(1, 6);
 
     const newOnlyCi = computeCustomerInsightsForMetric(
@@ -841,6 +852,8 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(newOnlyCi.grr).toBeNull();
     expect(newOnlyCi.churnRate).toBeNull();
     expect(newOnlyCi.newRate).toBeNull();
+    expect(newOnlyCi.retainedGrowthShare).toBeNull();
+    expect(newOnlyCi.newGrowthShare).toBeNull();
   });
 
   it('22. WI-5: Gross + Returns === Net for every group and total across Sales-only, Returns-only, and combined fixtures', () => {

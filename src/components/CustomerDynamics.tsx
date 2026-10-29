@@ -65,7 +65,6 @@ const KpiInfoTooltip: React.FC<KpiInfoTooltipProps> = ({
       type="button"
       aria-label={`About ${title}`}
       aria-describedby={id}
-      title={`${title} — ${meaning} Calculation: ${formula}`}
       className={`inline-flex h-4 w-4 items-center justify-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-fuchsia-500 ${iconToneClass}`}
     >
       <Info className="h-3.5 w-3.5" />
@@ -229,7 +228,7 @@ export const CustomerDynamics: React.FC = () => {
             Customer Dynamics
           </span>
           <span className="hidden text-xs font-medium text-slate-600 dark:text-slate-300 sm:inline">
-            Retention (NRR / GRR) · Lifecycle Segments · Defector Watchlist
+            Growth Share · Lifecycle Segments · Defector Watchlist
           </span>
         </div>
 
@@ -255,7 +254,7 @@ export const CustomerDynamics: React.FC = () => {
 
       <p className="sr-only">
         Customer dynamics for {METRIC_LABEL[metric]}: Active customers PY {ci.active.pyCount} to CY {ci.active.cyCount}.
-        Net Revenue Retention {fmtPct(ci.nrr)}, Gross Revenue Retention {fmtPct(ci.grr)}, Churn {fmtPct(ci.churnRate)}, New-business rate {fmtPct(ci.newRate)}.
+        Retained Growth Share {fmtPct(ci.retainedGrowthShare, true)}, New Customer Growth Share {fmtPct(ci.newGrowthShare, true)}.
       </p>
 
       {open && (
@@ -280,7 +279,7 @@ export const CustomerDynamics: React.FC = () => {
           ) : (
             <>
               {/* 1. Retention & Active Base KPI Strip */}
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
                 {/* Active Customers */}
                 <div className="relative rounded-xl border border-indigo-200/70 bg-white/80 p-2.5 shadow-sm hover:z-30 focus-within:z-30 dark:border-slate-800 dark:bg-slate-900/70">
                   <div className="flex items-center justify-between gap-1">
@@ -325,7 +324,7 @@ export const CustomerDynamics: React.FC = () => {
                       title={`Avg / Active (${METRIC_LABEL[metric]})`}
                       meaning={`Average ${metric === 'units' ? 'units' : 'sales value'} per active customer — shows whether average account spend/volume is expanding or shrinking.`}
                       formula={`CY Avg = Total CY ${METRIC_LABEL[metric]} ÷ CY Active Customers (PY Avg = Total PY ÷ PY Active)`}
-                      alignClass="right-0 sm:left-0"
+                      alignClass="right-0 sm:right-0 lg:left-0"
                     />
                   </div>
                   <div className="mt-1 flex items-baseline justify-between gap-1 tabular-nums">
@@ -347,94 +346,82 @@ export const CustomerDynamics: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Net Revenue Retention (NRR) */}
-                <div className="relative rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] p-2.5 shadow-sm hover:z-30 focus-within:z-30 dark:border-emerald-500/20 dark:bg-emerald-950/20">
-                  <div className="flex items-center justify-between gap-1">
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                      Net Retention (NRR)
+                {/* Retained Growth Share */}
+                {(() => {
+                  const isRetainedPos = (ci.retainedGrowthShare ?? 0) >= 0;
+                  return (
+                    <div
+                      className={`relative rounded-xl border p-2.5 shadow-sm hover:z-30 focus-within:z-30 ${
+                        isRetainedPos
+                          ? 'border-emerald-500/30 bg-emerald-500/[0.04] dark:border-emerald-500/20 dark:bg-emerald-950/20'
+                          : 'border-rose-500/30 bg-rose-500/[0.04] dark:border-rose-500/20 dark:bg-rose-950/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <div
+                          className={`text-[10px] font-extrabold uppercase tracking-wider ${
+                            isRetainedPos
+                              ? 'text-emerald-800 dark:text-emerald-300'
+                              : 'text-rose-800 dark:text-rose-300'
+                          }`}
+                        >
+                          Retained Growth Share
+                        </div>
+                        <KpiInfoTooltip
+                          id="kpi-tip-retained-growth-share"
+                          title="Retained Growth Share"
+                          meaning={`Share of total YoY growth rate contributed by continuing and lost accounts (including expansion, contraction, and churn).`}
+                          formula="Retained Share = (Σ CY Retained − Σ PY Base) ÷ |Σ PY Base| = NRR − 100% · Identity: Retained + New = Total YoY Growth %"
+                          alignClass="left-0 sm:left-0 lg:right-0"
+                          iconToneClass={
+                            isRetainedPos
+                              ? 'text-emerald-600/70 hover:bg-emerald-500/15 hover:text-emerald-800 dark:text-emerald-400/70 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-200'
+                              : 'text-rose-600/70 hover:bg-rose-500/15 hover:text-rose-800 dark:text-rose-400/70 dark:hover:bg-rose-500/20 dark:hover:text-rose-200'
+                          }
+                        />
+                      </div>
+                      <div
+                        className={`mt-1 text-sm font-extrabold tabular-nums ${
+                          isRetainedPos
+                            ? 'text-emerald-700 dark:text-emerald-300'
+                            : 'text-rose-700 dark:text-rose-300'
+                        }`}
+                      >
+                        {fmtPct(ci.retainedGrowthShare, true)}
+                      </div>
+                      <div
+                        className="mt-0.5 truncate text-[10px] text-slate-500 dark:text-slate-400 tabular-nums"
+                        title={`Δ ${fmtSigned(ci.retainedDelta, metric, true)} · NRR ${fmtPct(ci.nrr)}`}
+                      >
+                        Δ {fmtSigned(ci.retainedDelta, metric, true)} · NRR {fmtPct(ci.nrr)}
+                      </div>
                     </div>
-                    <KpiInfoTooltip
-                      id="kpi-tip-nrr"
-                      title="Net Retention (NRR)"
-                      meaning={`Share of Prior Year ${metric === 'units' ? 'units' : 'value'} retained from continuing customers (active in both PY and CY), including expansion and contraction, excluding new customers. NRR > 100% means existing accounts grew net of churn.`}
-                      formula="NRR = Σ CY (Retained) ÷ |Σ PY (PY-Active)| = GRR + Expansion Rate"
-                      alignClass="left-0 sm:right-0 lg:left-0"
-                      iconToneClass="text-emerald-600/70 hover:bg-emerald-500/15 hover:text-emerald-800 dark:text-emerald-400/70 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-200"
-                    />
-                  </div>
-                  <div className="mt-1 text-sm font-extrabold tabular-nums text-emerald-700 dark:text-emerald-300">
-                    {fmtPct(ci.nrr)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
-                    Expansion: {fmtPct(ci.expansionRate, true)}
-                  </div>
-                </div>
+                  );
+                })()}
 
-                {/* Gross Revenue Retention (GRR) */}
-                <div className="relative rounded-xl border border-indigo-200/70 bg-white/80 p-2.5 shadow-sm hover:z-30 focus-within:z-30 dark:border-slate-800 dark:bg-slate-900/70">
-                  <div className="flex items-center justify-between gap-1">
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      Gross Retention (GRR)
-                    </div>
-                    <KpiInfoTooltip
-                      id="kpi-tip-grr"
-                      title="Gross Retention (GRR)"
-                      meaning={`Share of Prior Year ${metric === 'units' ? 'units' : 'value'} kept from continuing customers before counting expansion (upsell). Capped at 100% (GRR ≤ NRR) to isolate baseline retention against contraction and lost churn.`}
-                      formula="GRR = (Σ PY Retained + Contraction) ÷ |Σ PY (PY-Active)| = 100% − Lost Churn − Contraction"
-                      alignClass="right-0 sm:left-0"
-                    />
-                  </div>
-                  <div className="mt-1 text-sm font-extrabold tabular-nums text-slate-900 dark:text-white">
-                    {fmtPct(ci.grr)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
-                    Contraction: {ci.contractionRate !== null ? `−${fmtPct(ci.contractionRate)}` : '–'}
-                  </div>
-                </div>
-
-                {/* Lost-Customer Churn */}
-                <div className="relative rounded-xl border border-rose-500/30 bg-rose-500/[0.04] p-2.5 shadow-sm hover:z-30 focus-within:z-30 dark:border-rose-500/20 dark:bg-rose-950/20">
-                  <div className="flex items-center justify-between gap-1">
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-rose-800 dark:text-rose-300">
-                      Lost Churn Rate
-                    </div>
-                    <KpiInfoTooltip
-                      id="kpi-tip-churn"
-                      title="Lost Churn Rate"
-                      meaning={`Share of Prior Year ${metric === 'units' ? 'units' : 'value'} lost from defector customers who purchased in PY (PY ≠ 0) but had zero activity in CY (CY = 0).`}
-                      formula="Lost Churn = Σ PY (Lost Customers) ÷ |Σ PY (PY-Active)|"
-                      alignClass="left-0 lg:right-0"
-                      iconToneClass="text-rose-600/70 hover:bg-rose-500/15 hover:text-rose-800 dark:text-rose-400/70 dark:hover:bg-rose-500/20 dark:hover:text-rose-200"
-                    />
-                  </div>
-                  <div className="mt-1 text-sm font-extrabold tabular-nums text-rose-700 dark:text-rose-300">
-                    {fmtPct(ci.churnRate)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
-                    {ci.segments.lost.count.toLocaleString('en-US')} lost accounts
-                  </div>
-                </div>
-
-                {/* New-Business Rate */}
+                {/* New Customer Growth Share */}
                 <div className="relative rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-2.5 shadow-sm hover:z-30 focus-within:z-30 dark:border-amber-500/20 dark:bg-amber-950/20">
                   <div className="flex items-center justify-between gap-1">
                     <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                      New-Business Rate
+                      New Customer Growth Share
                     </div>
                     <KpiInfoTooltip
-                      id="kpi-tip-new-rate"
-                      title="New-Business Rate"
-                      meaning={`Share of Prior Year ${metric === 'units' ? 'units' : 'value'} added by newly acquired customers in CY (PY = 0, CY ≠ 0). Together with NRR, it reconciles to total YoY growth.`}
-                      formula="New Rate = Σ CY (New Customers) ÷ |Σ PY (PY-Active)| · Identity: NRR + New Rate = 1 + g"
+                      id="kpi-tip-new-growth-share"
+                      title="New Customer Growth Share"
+                      meaning={`Share of total YoY growth rate contributed by newly acquired customers in CY (PY = 0, CY ≠ 0). Together with Retained Growth Share, it reconciles to total YoY growth.`}
+                      formula="New Customer Share = Σ CY (New Customers) ÷ |Σ PY Base| · Identity: Retained + New = Total YoY Growth %"
                       alignClass="right-0"
                       iconToneClass="text-amber-600/70 hover:bg-amber-500/15 hover:text-amber-800 dark:text-amber-400/70 dark:hover:bg-amber-500/20 dark:hover:text-amber-200"
                     />
                   </div>
                   <div className="mt-1 text-sm font-extrabold tabular-nums text-amber-700 dark:text-amber-300">
-                    {fmtPct(ci.newRate, true)}
+                    {fmtPct(ci.newGrowthShare, true)}
                   </div>
-                  <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
-                    {ci.segments.new.count.toLocaleString('en-US')} new · NRR + New = 1 + g
+                  <div
+                    className="mt-0.5 truncate text-[10px] text-slate-500 dark:text-slate-400 tabular-nums"
+                    title={`${ci.segments.new.count.toLocaleString('en-US')} new · CY ${fmtMetric(ci.newDelta, metric, true)}`}
+                  >
+                    {ci.segments.new.count.toLocaleString('en-US')} new · CY {fmtMetric(ci.newDelta, metric, true)}
                   </div>
                 </div>
               </div>
