@@ -151,3 +151,5 @@ npm run test         # Run Vitest acceptance & export test suite (26 tests acros
 npm run typecheck    # Run TypeScript compiler check (tsc --noEmit)
 npm run build        # Typecheck and build production bundle to dist/
 ```
+#   G r o w t h - i n s i g h t s  
+ 
