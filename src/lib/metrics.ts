@@ -480,9 +480,269 @@ export function isReturnsFlagged(
   portfolioRatePct: number | null,
 ): boolean {
   if (portfolioRatePct === null || portfolioRatePct <= 0) return false;
-  if (rowGrossCyV < RETURNS_MIN_GROSS) return false;
+  if ( rowGrossCyV < RETURNS_MIN_GROSS) return false;
   const rowRate = returnsRatePct(rowNetCyV, rowGrossCyV);
   if (rowRate === null) return false;
   return rowRate > RETURNS_FLAG_FACTOR * portfolioRatePct;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Product × Customer-Segment Exposure & Customer-Behavior Growth Decomposition
+// ---------------------------------------------------------------------------------------------
+
+export type ProductExposureLevel = 'item' | 'brand' | 'line';
+export const PRODUCT_EXPOSURE_LEVELS: ProductExposureLevel[] = ['item', 'brand', 'line'];
+export const PRODUCT_EXPOSURE_LEVEL_LABEL: Record<ProductExposureLevel, string> = {
+  item: 'Item',
+  brand: 'Brand',
+  line: 'Line',
+};
+
+export interface CustomerBehaviorRow {
+  /** Sales from customers with PY = 0, CY ≠ 0 for this product. */
+  newCustomerEffect: number;
+  /** Positive Δ from retained customers (PY ≠ 0, CY ≠ 0) who increased purchases of this product. */
+  expansionEffect: number;
+  /** Negative (or 0) Δ from retained customers (PY ≠ 0, CY ≠ 0) who decreased purchases of this product. */
+  contractionEffect: number;
+  /** Negative (or 0) Δ from customers with PY ≠ 0, CY = 0 for this product. */
+  lostCustomerEffect: number;
+  /** Exact sum: newCustomerEffect + expansionEffect + contractionEffect + lostCustomerEffect === cy − py. */
+  totalDelta: number;
+  newPp: number | null;
+  expansionPp: number | null;
+  contractionPp: number | null;
+  lostPp: number | null;
+}
+
+/**
+ * Decomposes a product's YoY Δ across per-customer pairs into:
+ * `newCustomerEffect + expansionEffect + contractionEffect + lostCustomerEffect === totalDelta`.
+ */
+export function decomposeCustomerBehavior(
+  perCustomer: { customerId?: string; pyQ: number; pyV: number; cyQ: number; cyV: number }[],
+  totalPy: number,
+  metric: Metric = 'value',
+): CustomerBehaviorRow {
+  let newCustomerEffect = 0;
+  let expansionEffect = 0;
+  let contractionEffect = 0;
+  let lostCustomerEffect = 0;
+
+  for (const c of perCustomer) {
+    const py = metric === 'units' ? c.pyQ : c.pyV;
+    const cy = metric === 'units' ? c.cyQ : c.cyV;
+    const pyZ = isZero(py);
+    const cyZ = isZero(cy);
+    if (pyZ && cyZ) continue;
+    if (pyZ && !cyZ) {
+      newCustomerEffect += cy - py;
+    } else if (!pyZ && cyZ) {
+      lostCustomerEffect += cy - py;
+    } else {
+      const d = cy - py;
+      if (d > 0) expansionEffect += d;
+      else contractionEffect += d;
+    }
+  }
+
+  const totalDelta = newCustomerEffect + expansionEffect + contractionEffect + lostCustomerEffect;
+  const hasPy = !isZero(totalPy);
+
+  return {
+    newCustomerEffect,
+    expansionEffect,
+    contractionEffect,
+    lostCustomerEffect,
+    totalDelta,
+    newPp: hasPy ? contributionPp(newCustomerEffect, totalPy) : null,
+    expansionPp: hasPy ? contributionPp(expansionEffect, totalPy) : null,
+    contractionPp: hasPy ? contributionPp(contractionEffect, totalPy) : null,
+    lostPp: hasPy ? contributionPp(lostCustomerEffect, totalPy) : null,
+  };
+}
+
+/**
+ * Sums item-level CustomerBehaviorRow effects into a parent (Brand or Line) CustomerBehaviorRow,
+ * preserving the exact identity `new + expansion + contraction + lost === totalDelta`.
+ */
+export function mergeCustomerBehaviorRows(
+  rows: CustomerBehaviorRow[],
+  parentPy: number,
+): CustomerBehaviorRow {
+  let newCustomerEffect = 0;
+  let expansionEffect = 0;
+  let contractionEffect = 0;
+  let lostCustomerEffect = 0;
+  for (const r of rows) {
+    newCustomerEffect += r.newCustomerEffect;
+    expansionEffect += r.expansionEffect;
+    contractionEffect += r.contractionEffect;
+    lostCustomerEffect += r.lostCustomerEffect;
+  }
+  const totalDelta = newCustomerEffect + expansionEffect + contractionEffect + lostCustomerEffect;
+  const hasPy = !isZero(parentPy);
+  return {
+    newCustomerEffect,
+    expansionEffect,
+    contractionEffect,
+    lostCustomerEffect,
+    totalDelta,
+    newPp: hasPy ? contributionPp(newCustomerEffect, parentPy) : null,
+    expansionPp: hasPy ? contributionPp(expansionEffect, parentPy) : null,
+    contractionPp: hasPy ? contributionPp(contractionEffect, parentPy) : null,
+    lostPp: hasPy ? contributionPp(lostCustomerEffect, parentPy) : null,
+  };
+}
+
+export interface ProductSegmentBreakdown {
+  itemId: string;
+  itemLabel: string;
+  level: ProductExposureLevel;
+  brand?: string;
+  line?: string;
+  /** 5-segment sums bucketed by each customer's overall lifecycle segment. */
+  segments: Record<CustomerSegment, Sums>;
+  /** Product PY / CY totals (reconciles with Σ segments). */
+  totals: Sums;
+  /** Signed percentage-point contribution of each customer segment to the product's YoY % (segment Δ ÷ |product PY| × 100). */
+  newAcquisitionPp: number | null;
+  expansionPp: number | null;
+  stablePp: number | null;
+  contractionExposurePp: number | null;
+  churnExposurePp: number | null;
+  /** Enhancement 2: per-product customer-behavior decomposition (PY → +New → +Expansion → −Contraction → −Lost → CY). */
+  customerBehavior: CustomerBehaviorRow;
+}
+
+export interface ProductExposureByMetric {
+  byLevel: Record<ProductExposureLevel, ProductSegmentBreakdown[]>;
+}
+
+export interface ProductExposure extends ProductExposureByMetric {
+  byMetric: Record<Metric, ProductExposureByMetric>;
+}
+
+export function buildProductSegmentBreakdown(params: {
+  itemId: string;
+  itemLabel: string;
+  level: ProductExposureLevel;
+  brand?: string;
+  line?: string;
+  segments: Record<CustomerSegment, Sums>;
+  totals: Sums;
+  customerBehavior: CustomerBehaviorRow;
+  metric: Metric;
+}): ProductSegmentBreakdown {
+  const { itemId, itemLabel, level, brand, line, segments, totals, customerBehavior, metric } = params;
+  const { py } = metricPair(totals, metric);
+  const segDelta = (seg: CustomerSegment) => {
+    const p = metricPair(segments[seg], metric);
+    return p.cy - p.py;
+  };
+  return {
+    itemId,
+    itemLabel,
+    level,
+    brand,
+    line,
+    segments,
+    totals,
+    newAcquisitionPp: contributionPp(segDelta('new'), py),
+    expansionPp: contributionPp(segDelta('growing'), py),
+    stablePp: contributionPp(segDelta('stable'), py),
+    contractionExposurePp: contributionPp(segDelta('declining'), py),
+    churnExposurePp: contributionPp(segDelta('lost'), py),
+    customerBehavior,
+  };
+}
+
+export interface ProductBehaviorWaterfallStep {
+  id: 'py' | 'new' | 'expansion' | 'contraction' | 'lost' | 'cy';
+  label: string;
+  shortLabel: string;
+  kind: 'py' | 'pos' | 'neg' | 'cy';
+  start: number;
+  end: number;
+  spacer: number;
+  span: number;
+  delta: number;
+  pp: number | null;
+}
+
+/**
+ * Builds the 6-row bridge waterfall (`PY → +New → +Expansion → −Contraction → −Lost → CY`)
+ * for a single product's CustomerBehaviorRow.
+ * Guarantees `PY + newCustomerEffect + expansionEffect + contractionEffect + lostCustomerEffect === CY`.
+ */
+export function buildProductBehaviorWaterfall(
+  totals: Sums,
+  cb: CustomerBehaviorRow,
+  metric: Metric,
+  period: { pyLabel: string; cyLabel: string },
+): ProductBehaviorWaterfallStep[] {
+  const { py, cy } = metricPair(totals, metric);
+  const totalDelta = cy - py;
+  const steps: ProductBehaviorWaterfallStep[] = [];
+
+  steps.push({
+    id: 'py',
+    label: `PY (${period.pyLabel})`,
+    shortLabel: `PY (${period.pyLabel})`,
+    kind: 'py',
+    start: 0,
+    end: py,
+    spacer: Math.min(0, py),
+    span: Math.abs(py),
+    delta: py,
+    pp: null,
+  });
+
+  let running = py;
+  const pushEffect = (
+    id: 'new' | 'expansion' | 'contraction' | 'lost',
+    label: string,
+    kind: 'pos' | 'neg',
+    delta: number,
+    pp: number | null,
+  ) => {
+    const start = running;
+    const end = running + delta;
+    running = end;
+    steps.push({
+      id,
+      label,
+      shortLabel: label,
+      kind,
+      start,
+      end,
+      spacer: Math.min(start, end),
+      span: Math.abs(delta),
+      delta,
+      pp,
+    });
+  };
+
+  pushEffect('new', '+New Customers', 'pos', cb.newCustomerEffect, cb.newPp);
+  pushEffect('expansion', '+Expansion (Retained)', 'pos', cb.expansionEffect, cb.expansionPp);
+  pushEffect('contraction', '−Contraction (Retained)', 'neg', cb.contractionEffect, cb.contractionPp);
+  pushEffect('lost', '−Lost Customers', 'neg', cb.lostCustomerEffect, cb.lostPp);
+
+  steps.push({
+    id: 'cy',
+    label: `CY (${period.cyLabel})`,
+    shortLabel: `CY (${period.cyLabel})`,
+    kind: 'cy',
+    start: 0,
+    end: cy,
+    spacer: Math.min(0, cy),
+    span: Math.abs(cy),
+    delta: cy,
+    pp: contributionPp(totalDelta, py),
+  });
+
+  return steps;
+}
+
+
 

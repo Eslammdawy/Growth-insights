@@ -30,6 +30,9 @@ const CyTreemap = React.lazy(() =>
 const CustomerDynamics = React.lazy(() =>
   import('../components/CustomerDynamics').then((m) => ({ default: m.CustomerDynamics }))
 );
+const ProductCustomerExposure = React.lazy(() =>
+  import('../components/ProductCustomerExposure').then((m) => ({ default: m.ProductCustomerExposure }))
+);
 
 function ChartSkeleton() {
   return (
@@ -257,11 +260,22 @@ export const Dashboard: React.FC = () => {
                 {TABLE_LEVELS.map((lvl) => (
                   <React.Fragment key={lvl}>
                     {lvl === 'customer' && (
-                      <ErrorBoundary title="Customer Dynamics">
-                        <Suspense fallback={<ChartSkeleton />}>
-                          <CustomerDynamics />
-                        </Suspense>
-                      </ErrorBoundary>
+                      <section
+                        id="section-customer-dynamics"
+                        aria-label="Customer Dynamics"
+                        className="space-y-4 scroll-mt-28"
+                      >
+                        <ErrorBoundary title="Customer Dynamics">
+                          <Suspense fallback={<ChartSkeleton />}>
+                            <CustomerDynamics />
+                          </Suspense>
+                        </ErrorBoundary>
+                        <ErrorBoundary title="Product × Customer-Segment Exposure">
+                          <Suspense fallback={<ChartSkeleton />}>
+                            <ProductCustomerExposure />
+                          </Suspense>
+                        </ErrorBoundary>
+                      </section>
                     )}
                     <ErrorBoundary title={`${LEVEL_LABEL[lvl]} Level Table`}>
                       <LevelTable level={lvl} />

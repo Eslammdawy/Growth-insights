@@ -1,8 +1,10 @@
 import { DatasetMeta, DrillChip, InsightLevel, brandOptions, itemOptions, subTypeOptions } from './aggregate';
-import { METRICS, Metric } from './metrics';
+import { METRICS, Metric, PRODUCT_EXPOSURE_LEVELS, ProductExposureLevel } from './metrics';
 import { PeriodSelection, quarterMonths } from './periods';
 
 export type HeatmapMode = 'yoy' | 'pp';
+export type ProductExposureView = 'all' | 'churn' | 'new';
+export const PRODUCT_EXPOSURE_VIEWS: readonly ProductExposureView[] = ['all', 'churn', 'new'];
 const VALID_DRIVER_LEVELS: readonly InsightLevel[] = ['subtype', 'distributor', 'territory', 'item'];
 
 export interface ParsedHashState {
@@ -21,6 +23,8 @@ export interface ParsedHashState {
   txTypes?: ('Sales' | 'Return Sales')[];
   drill?: DrillChip[];
   driverLevel?: InsightLevel;
+  productExposureLevel?: ProductExposureLevel;
+  productExposureView?: ProductExposureView;
   showReturns?: boolean;
   heatmapMode?: HeatmapMode;
 }
@@ -123,6 +127,16 @@ export function parseHashParams(hashString: string): ParsedHashState {
     if (VALID_DRIVER_LEVELS.includes(dlv)) out.driverLevel = dlv;
   }
 
+  if (params.has('pel')) {
+    const pel = params.get('pel') as ProductExposureLevel;
+    if (PRODUCT_EXPOSURE_LEVELS.includes(pel)) out.productExposureLevel = pel;
+  }
+
+  if (params.has('pev')) {
+    const pev = params.get('pev') as ProductExposureView;
+    if (PRODUCT_EXPOSURE_VIEWS.includes(pev)) out.productExposureView = pev;
+  }
+
   if (params.has('ret')) {
     const ret = params.get('ret');
     out.showReturns = ret === '1' || ret === 'true';
@@ -153,6 +167,8 @@ export function validateHashAgainstMeta(
   items: string[];
   drill: DrillChip[];
   driverLevel?: InsightLevel;
+  productExposureLevel?: ProductExposureLevel;
+  productExposureView?: ProductExposureView;
   showReturns?: boolean;
   heatmapMode?: HeatmapMode;
 } {
@@ -233,6 +249,8 @@ export function validateHashAgainstMeta(
     items,
     drill,
     driverLevel: parsed.driverLevel,
+    productExposureLevel: parsed.productExposureLevel,
+    productExposureView: parsed.productExposureView,
     showReturns: parsed.showReturns,
     heatmapMode: parsed.heatmapMode,
   };
@@ -251,6 +269,8 @@ export function serializeHashState(state: {
   items?: string[];
   drill: DrillChip[];
   driverLevel?: InsightLevel;
+  productExposureLevel?: ProductExposureLevel;
+  productExposureView?: ProductExposureView;
   showReturns?: boolean;
   heatmapMode?: HeatmapMode;
 }): string {
@@ -291,6 +311,12 @@ export function serializeHashState(state: {
   }
   if (state.driverLevel && state.driverLevel !== 'subtype') {
     params.set('dlv', state.driverLevel);
+  }
+  if (state.productExposureLevel && state.productExposureLevel !== 'item') {
+    params.set('pel', state.productExposureLevel);
+  }
+  if (state.productExposureView && state.productExposureView !== 'all') {
+    params.set('pev', state.productExposureView);
   }
   if (state.showReturns) {
     params.set('ret', '1');

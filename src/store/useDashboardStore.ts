@@ -18,12 +18,13 @@ import {
 } from '../lib/aggregate';
 import { SAMPLE_DATA_URL, TX_TYPES, TxType } from '../lib/config';
 import { DataErrorKind } from '../lib/columnar';
-import { Metric } from '../lib/metrics';
+import { Metric, ProductExposureLevel } from '../lib/metrics';
 import { ParseProgress } from '../lib/parse';
 import { PeriodSelection, defaultSelection } from '../lib/periods';
 import { workerClient } from '../workers/workerClient';
 import {
   HeatmapMode,
+  ProductExposureView,
   parseHashParams,
   validateHashAgainstMeta,
   serializeHashState,
@@ -45,7 +46,7 @@ function syncHashToUrl(st: DashboardState) {
   if (typeof window === 'undefined') return;
   const next = serializeHashState({
     metric: st.metric,
-    line: null,
+    line: st.line,
     period: st.period,
     mainTypes: st.mainTypes,
     subTypes: st.subTypes,
@@ -56,6 +57,8 @@ function syncHashToUrl(st: DashboardState) {
     items: st.items,
     drill: st.drill,
     driverLevel: st.driverLevel,
+    productExposureLevel: st.productExposureLevel,
+    productExposureView: st.productExposureView,
     showReturns: st.showReturns,
     heatmapMode: st.heatmapMode,
   });
@@ -83,9 +86,10 @@ export interface DashboardState {
   /** Item breakdowns keyed by table row id (cleared whenever the analysis is refreshed). */
   itemsByRow: Record<string, ItemsEntry>;
 
-  // Query state (always All Lines: line is null)
+  // Query state
   period: PeriodSelection;
   metric: Metric;
+  line: string | null;
   txTypes: TxType[];
   mainTypes: string[];
   subTypes: string[];
@@ -99,6 +103,8 @@ export interface DashboardState {
   chartMode: 'delta' | 'growth';
   chartLevel: Level;
   driverLevel: InsightLevel;
+  productExposureLevel: ProductExposureLevel;
+  productExposureView: ProductExposureView;
   showReturns: boolean;
   heatmapMode: HeatmapMode;
   customerStatusFilter: StatusFilter;
@@ -109,6 +115,7 @@ export interface DashboardState {
   refreshAnalysis: () => Promise<void>;
   fetchItems: (rowId: string, target: ItemTarget) => Promise<void>;
   setMetric: (metric: Metric) => void;
+  setLine: (line: string | null) => void;
   setPeriod: (patch: Partial<PeriodSelection>) => void;
   setTxTypes: (txTypes: TxType[]) => void;
   setMainTypes: (mainTypes: string[]) => void;
@@ -124,6 +131,8 @@ export interface DashboardState {
   setChartMode: (m: 'delta' | 'growth') => void;
   setChartLevel: (l: Level) => void;
   setDriverLevel: (l: InsightLevel) => void;
+  setProductExposureLevel: (l: ProductExposureLevel) => void;
+  setProductExposureView: (v: ProductExposureView) => void;
   setShowReturns: (show: boolean) => void;
   setHeatmapMode: (m: HeatmapMode) => void;
   setCustomerStatusFilter: (s: StatusFilter) => void;
@@ -140,7 +149,7 @@ function currentQuery(st: DashboardState): AnalysisQuery {
   return {
     period: st.period,
     txTypes: st.txTypes,
-    line: null,
+    line: st.line,
     brands: st.brands,
     items: st.items,
     mainTypes: st.mainTypes,
@@ -163,6 +172,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   period: { cyYear: 2026, pyYear: 2025, quarter: 3, month: null, likeForLike: true },
   metric: initialHash.metric ?? 'value',
+  line: initialHash.line ?? null,
   txTypes: [...TX_TYPES],
   mainTypes: [],
   subTypes: [],
@@ -175,6 +185,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   chartMode: 'delta',
   chartLevel: 'subtype',
   driverLevel: initialHash.driverLevel ?? 'subtype',
+  productExposureLevel: initialHash.productExposureLevel ?? 'item',
+  productExposureView: initialHash.productExposureView ?? 'all',
   showReturns: initialHash.showReturns ?? false,
   heatmapMode: initialHash.heatmapMode ?? 'yoy',
   customerStatusFilter: 'all',
@@ -188,11 +200,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       });
       const defPeriod = defaultSelection(meta.availability);
       const initialHash = parseHashParams(getHashSnapshot());
-      const v = validateHashAgainstMeta({ ...initialHash, line: null }, meta, defPeriod);
+      const v = validateHashAgainstMeta(initialHash, meta, defPeriod);
       set({
         meta,
         sourceName,
         metric: v.metric ?? get().metric,
+        line: v.line,
         period: v.period,
         mainTypes: v.mainTypes,
         subTypes: v.subTypes,
@@ -203,6 +216,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         items: v.items,
         drill: v.drill,
         driverLevel: v.driverLevel ?? get().driverLevel,
+        productExposureLevel: v.productExposureLevel ?? get().productExposureLevel,
+        productExposureView: v.productExposureView ?? get().productExposureView,
         showReturns: v.showReturns ?? get().showReturns,
         heatmapMode: v.heatmapMode ?? get().heatmapMode,
         loading: false,
@@ -264,6 +279,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setMetric: (metric) => {
     set({ metric });
     syncHashToUrl(get());
+  },
+
+  setLine: (line) => {
+    set({ line });
+    syncHashToUrl(get());
+    void get().refreshAnalysis();
   },
 
   setPeriod: (patch) => {
@@ -352,6 +373,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   resetFilters: () => {
     set({
+      line: null,
       txTypes: [...TX_TYPES],
       mainTypes: [],
       subTypes: [],
@@ -369,6 +391,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setChartLevel: (chartLevel) => set({ chartLevel }),
   setDriverLevel: (driverLevel) => {
     set({ driverLevel });
+    syncHashToUrl(get());
+  },
+  setProductExposureLevel: (productExposureLevel) => {
+    set({ productExposureLevel });
+    syncHashToUrl(get());
+  },
+  setProductExposureView: (productExposureView) => {
+    set({ productExposureView });
     syncHashToUrl(get());
   },
   setShowReturns: (showReturns) => {
@@ -392,9 +422,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     if (!st.meta) return;
     const hash = hashString ?? getHashSnapshot();
     const parsed = parseHashParams(hash);
-    const v = validateHashAgainstMeta({ ...parsed, line: null }, st.meta, st.period);
+    const v = validateHashAgainstMeta(parsed, st.meta, st.period);
     set({
       metric: v.metric ?? st.metric,
+      line: v.line,
       period: v.period,
       mainTypes: v.mainTypes,
       subTypes: v.subTypes,
@@ -405,6 +436,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       items: v.items,
       drill: v.drill,
       driverLevel: v.driverLevel ?? st.driverLevel,
+      productExposureLevel: v.productExposureLevel ?? st.productExposureLevel,
+      productExposureView: v.productExposureView ?? st.productExposureView,
       showReturns: v.showReturns ?? st.showReturns,
       heatmapMode: v.heatmapMode ?? st.heatmapMode,
     });

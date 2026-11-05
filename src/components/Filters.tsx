@@ -214,6 +214,8 @@ export const Filters: React.FC = () => {
   const {
     meta,
     result,
+    line,
+    setLine,
     brands,
     setBrands,
     items,
@@ -224,6 +226,8 @@ export const Filters: React.FC = () => {
     useShallow((s) => ({
       meta: s.meta,
       result: s.result,
+      line: s.line,
+      setLine: s.setLine,
       brands: s.brands,
       setBrands: s.setBrands,
       items: s.items,
@@ -235,15 +239,15 @@ export const Filters: React.FC = () => {
 
   const fo = result?.filterOptions;
   const availableBrands = useMemo(
-    () => fo?.brands ?? (meta ? brandOptions(meta, null) : []),
-    [fo, meta]
+    () => fo?.brands ?? (meta ? brandOptions(meta, line) : []),
+    [fo, meta, line]
   );
   const availableItems = useMemo(
-    () => fo?.items ?? (meta ? itemOptions(meta, null, brands) : []),
-    [fo, meta, brands]
+    () => fo?.items ?? (meta ? itemOptions(meta, line, brands) : []),
+    [fo, meta, line, brands]
   );
 
-  const activeFilterCount = brands.length + items.length + drill.length;
+  const activeFilterCount = (line ? 1 : 0) + brands.length + items.length + drill.length;
 
   return (
     <section
@@ -296,6 +300,21 @@ export const Filters: React.FC = () => {
         {/* Active Filter Summary Chips + Reset Button */}
         {activeFilterCount > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
+            {line && (
+              <span
+                className="inline-flex items-center gap-1 rounded-lg border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[11px] font-semibold text-purple-800 dark:text-purple-200"
+              >
+                Line: {line}
+                <button
+                  type="button"
+                  onClick={() => startTransition(() => setLine(null))}
+                  aria-label={`Remove line ${line}`}
+                  className="rounded-full p-0.5 hover:bg-purple-500/20"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            )}
             {brands.map((b) => (
               <span
                 key={`b-${b}`}
