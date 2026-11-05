@@ -54,6 +54,13 @@ The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xls
     - **Gross Retention (GRR)**: $\frac{\sum_{\text{PY}_i > 0 \land \text{CY}_i > 0} \min(\text{CY}_i, \text{PY}_i)}{|\text{PY}_{\text{active}}|} \in [0, 1]$
     - **Lost Churn Rate**: $\frac{\sum_{\text{Lost}} \text{PY}_i}{|\text{PY}_{\text{active}}|}$ and **Contraction Rate**: $\frac{\sum_{\text{Retained, }\Delta_i < 0} |\Delta_i|}{|\text{PY}_{\text{active}}|}$ (satisfying $\text{GRR} + \text{Contraction Rate} + \text{Churn Rate} = 1$)
     - **New-Business Rate**: $\frac{\sum_{\text{New}} \text{CY}_i}{|\text{PY}_{\text{active}}|}$ (satisfying $\text{NRR} + \text{New-Business Rate} = 1 + g$)
+  - **Product × Customer-Segment Exposure (`ProductSegmentBreakdown`)**:
+    - For every `Item`, `Brand`, and `Line`, buckets each $(\text{product}, \text{customer})$ pair into the customer's overall lifecycle segment (`New`, `Growing`, `Stable`, `Declining`, `Lost`) so $\sum_{s} \Delta_{p,s} = \Delta_p$.
+    - Signed segment percentage-point contributions: $\text{Segment pp}_{p,s} = \frac{\Delta_{p,s}}{|\text{PY}_p|} \times 100$, summing across all 5 segments to the product's YoY % ($\text{New pp} + \text{Expansion pp} + \text{Stable pp} + \text{Contraction pp} + \text{Churn pp} = \text{YoY \%}_p$).
+  - **Customer-Behavior Decomposition of Product Growth (`decomposeCustomerBehavior`)**:
+    - Partitions each item's $\Delta_p$ across its own customers into:
+      $$\Delta_p = \underbrace{\sum_{\text{PY}_{p,c}=0,\text{CY}_{p,c}\neq 0} \Delta_{p,c}}_{\text{New Customer Effect}} + \underbrace{\sum_{\text{Retained},\Delta_{p,c}>0} \Delta_{p,c}}_{\text{Expansion Effect}} + \underbrace{\sum_{\text{Retained},\Delta_{p,c}\le 0} \Delta_{p,c}}_{\text{Contraction Effect}} + \underbrace{\sum_{\text{PY}_{p,c}\neq 0,\text{CY}_{p,c}=0} \Delta_{p,c}}_{\text{Lost Customer Effect}}$$
+    - `Brand` and `Line` effects are summed from item-level effects (`mergeCustomerBehaviorRows`), preserving $\text{New} + \text{Expansion} + \text{Contraction} + \text{Lost} = \Delta_p$.
 - **KPI Cards (`src/components/KpiCards.tsx`)**:
   - Displays 3 aligned KPI cards: Current Period (with Prior Period figure shown in the metadata below), YoY Growth %, and YoY Growth ($\Delta$).
   - Displays a live monthly CY-vs-PY mini sparkline under YoY Growth % comparing trends across the quarter.
@@ -82,10 +89,11 @@ Every visual on the dashboard includes: (1) an `sr-only` text summary alternativ
    - Plots `x = PY`, `y = YoY %`, `size = CY`, and `color = status` (`Growing`, `Declining`, `New`, `Lost`, `Flat`) across `SubType`, `Distributor`, `Territory`, or `Brick`. Clicking any bubble adds a cross-filter drill chip.
 5. **CY Value Treemap Colored by Growth (`src/components/CyTreemap.tsx`)**:
    - Recharts `Treemap` where tile area is proportional to `CY Value` and tile fill reflects `YoY Value Growth %` via `treemapFillColor` from the shared palette (`src/lib/palette.ts`). Clicking any tile adds a drill chip.
-6. **Customer Dynamics — Retention, Cohort Bridge & Defector Watchlist (`src/components/CustomerDynamics.tsx`, `#section-customer-dynamics`)**:
-   - **6-Card Retention KPI Strip**: `Active Customers`, `Avg / Active (Value / Units)`, `Net Retention (NRR)`, `Gross Retention (GRR)`, `Lost Churn Rate`, and `New-Business Rate`. Every card includes an interactive **`KpiInfoTooltip`** (`i` icon popover) explaining its plain-English business meaning and exact calculation formula.
+6. **Customer Dynamics — Retention, Cohort Bridge, Defector Watchlist & Product × Customer-Segment Exposure (`src/components/CustomerDynamics.tsx`, `src/components/ProductCustomerExposure.tsx`, `#section-customer-dynamics`)**:
+   - **4-Card Retention KPI Strip**: `Active Customers`, `Avg / Active (Value / Units)`, `Retained Growth Share`, and `New Customer Growth Share`. Every card includes an interactive **`KpiInfoTooltip`** (`i` icon popover) explaining its plain-English business meaning and exact calculation formula.
    - **Clickable 5-Segment Lifecycle Table**: Breaks down `New`, `Growing (>+5%)`, `Stable (±5%)`, `Declining (<-5%)`, and `Lost` customer cohorts with `PY`, `CY`, `YoY Δ`, `YoY %`, and `Contrib. %`. Clicking any row filters the Customer table below and smooth-scrolls to `#table-customer`.
    - **Top-10 Lost Customers Defector Watchlist**: Ranks the largest lost accounts by `PY Lost` and `Contrib. %`, supports inline expansion to inspect the exact items each defector bought in PY, one-click customer drill filtering, and `.xlsx` export (`Export watchlist` via `exportDefectorWatchlistToExcel`).
+   - **Product × Customer-Segment Exposure Matrix (`src/components/ProductCustomerExposure.tsx`)**: Lazy-loaded directly below `CustomerDynamics` inside `#section-customer-dynamics` with an `Item` / `Brand` / `Line` level selector (`pel=`), quick-view chips (`All`, `Top 10 churn-exposed`, `Top 10 new-customer-driven` persisted via `pev=`), `Chart / Table` toggle, sortable columns with `aria-sort` and `KpiInfoTooltip` headers, proportional 5-segment Δ bars, inline expandable 6-step Customer-Behavior Decomposition waterfall (`PY → +New → +Expansion → −Contraction → −Lost → CY`), and `.xlsx` export (`exportProductExposureToExcel`).
 
 ## Multi-Level Stacked Tables, Item Drill-Down & Excel Export
 
@@ -118,9 +126,9 @@ Each level table includes:
 
 1. **Granular Selectors (`useShallow`)**: Isolated Zustand store subscriptions prevent table re-renders when typing in the search boxes, toggling chart modes, or switching driver levels.
 2. **Concurrent Transitions (`useTransition`)**: Filter, period, and view switches are scheduled as low-priority transitions, keeping the user interface completely responsive.
-3. **Code-Splitting & Lazy Loading**: All chart and analytical sections (`GrowthDrivers`, `MonthChart`, `GrowthChart`, `BubbleScatterChart`, `CyTreemap`, `CustomerDynamics`) are lazily loaded with `Suspense` skeletons and isolated by an `ErrorBoundary`.
+3. **Code-Splitting & Lazy Loading**: All chart and analytical sections (`GrowthDrivers`, `MonthChart`, `GrowthChart`, `BubbleScatterChart`, `CyTreemap`, `CustomerDynamics`, `ProductCustomerExposure`) are lazily loaded with `Suspense` skeletons and isolated by an `ErrorBoundary`.
 4. **URL Hash Synchronization (`useSyncExternalStore`)**:
-   - Automatically synchronizes filter and view parameters in the URL hash (`metric`, `year`, `q`, `m`, `lfl`, `brands`, `items`, `mainTypes`, `subTypes`, `distributors`, `territories`, `txTypes`, `drill`, plus optional `dlv`, `ret`, and `hmm`).
+   - Automatically synchronizes filter and view parameters in the URL hash (`metric`, `line`, `year`, `q`, `m`, `lfl`, `brands`, `items`, `mainTypes`, `subTypes`, `distributors`, `territories`, `txTypes`, `drill`, plus optional `dlv`, `pel`, `pev`, `ret`, and `hmm`).
    - Uses `useSyncExternalStore` for browser navigation (Back/Forward) and validates all URL parameters against dataset metadata on load.
 5. **Color-Blind-Safe Theming (`src/lib/palette.ts`)**:
    - Okabe-Ito inspired `up` (`#0072B2`) and `down` (`#D55E00`) palette defined centrally in `tailwind.config.js` and exposed via CSS variables (`--color-up`, `--color-up-light`, `--color-up-vivid`, `--color-down`, `--color-down-light`, `--color-down-vivid`).
@@ -147,9 +155,7 @@ Any row under an expandable `SubType` whose `Chain` is empty/null is grouped int
 npm install          # Install dependencies
 npm run convert      # Stream-convert ../HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xlsx -> public/data/sales.json.gz
 npm run dev          # Start Vite dev server
-npm run test         # Run Vitest acceptance & export test suite (26 tests across 2 files)
+npm run test         # Run Vitest acceptance & export test suite (29 tests across 2 files)
 npm run typecheck    # Run TypeScript compiler check (tsc --noEmit)
 npm run build        # Typecheck and build production bundle to dist/
 ```
-#   G r o w t h - i n s i g h t s  
- 

@@ -24,15 +24,20 @@ import {
 import {
   CUSTOMER_SEGMENTS,
   METRICS,
+  PRODUCT_EXPOSURE_LEVELS,
+  buildProductBehaviorWaterfall,
   classifyCustomerSegment,
   computeCustomerInsightsForMetric,
   contributionPp,
+  decomposeCustomerBehavior,
   decomposePriceVolume,
   deriveReturnsSums,
   deriveRow,
   growth,
   isReturnsFlagged,
+  isZero,
   metricCells,
+  metricPair,
   priceVolumeRow,
   returnsRatePct,
 } from './metrics';
@@ -309,10 +314,14 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       brands: brandOptions(sampleMeta, sampleMeta.lines[0]).slice(0, 1),
       items: itemOptions(sampleMeta, sampleMeta.lines[0], []).slice(0, 1),
       drill: [{ field: 'SubType' as const, value: 'Chain', label: 'Chain' }],
+      productExposureLevel: 'brand' as const,
+      productExposureView: 'churn' as const,
     };
 
     const hash = serializeHashState(original);
     expect(hash.startsWith('#')).toBe(true);
+    expect(hash).toContain('pel=brand');
+    expect(hash).toContain('pev=churn');
 
     const parsed = parseHashParams(hash);
     expect(parsed.metric).toBe('units');
@@ -323,6 +332,8 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(parsed.likeForLike).toBe(false);
     expect(parsed.txTypes).toEqual(['Sales']);
     expect(parsed.drill).toEqual([{ field: 'SubType', value: 'Chain', label: 'Chain' }]);
+    expect(parsed.productExposureLevel).toBe('brand');
+    expect(parsed.productExposureView).toBe('churn');
 
     const defPeriod = defaultSelection(sampleMeta.availability);
     const validated = validateHashAgainstMeta(parsed, sampleMeta, defPeriod);
@@ -334,12 +345,16 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(validated.period.likeForLike).toBe(false);
     expect(validated.txTypes).toEqual(['Sales']);
     expect(validated.drill).toEqual([{ field: 'SubType', value: 'Chain', label: 'Chain' }]);
+    expect(validated.productExposureLevel).toBe('brand');
+    expect(validated.productExposureView).toBe('churn');
 
     // Invalid parameters fall back to safe defaults
-    const invalidParsed = parseHashParams('#line=NonExistentLine&year=1990&q=9&m=99&metric=invalid&txTypes=Unknown&drill=malformed{json');
+    const invalidParsed = parseHashParams('#line=NonExistentLine&year=1990&q=9&m=99&metric=invalid&txTypes=Unknown&pel=subtype&pev=invalid&drill=malformed{json');
     const safeValidated = validateHashAgainstMeta(invalidParsed, sampleMeta, defPeriod);
     expect(safeValidated.line).toBeNull();
     expect(safeValidated.metric).toBeUndefined();
+    expect(safeValidated.productExposureLevel).toBeUndefined();
+    expect(safeValidated.productExposureView).toBeUndefined();
     expect(safeValidated.period.cyYear).toBe(defPeriod.cyYear);
     expect(safeValidated.period.quarter).toBe(defPeriod.quarter);
     expect(safeValidated.period.month).toBeNull();
@@ -909,5 +924,145 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       }
       expect(sumCellPp).toBeCloseTo(expectedPp, 6);
     }
+  });
+
+  it('24. Enhancement 1: Product × Customer-Segment Exposure Matrix reconciles Σ segments.delta === product.totals.delta across Item, Brand, and Line', () => {
+    const res = analyze(sampleDs, baseQuery());
+    const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
+    const edgeMeta = buildMeta(edgeDs);
+    const edgeRes = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability) }));
+
+    for (const r of [res, edgeRes]) {
+      for (const m of METRICS) {
+        const expByMetric = r.productExposure.byMetric[m];
+        const portfolioTotals = metricPair(r.totals, m);
+
+        for (const lvl of PRODUCT_EXPOSURE_LEVELS) {
+          const list = expByMetric.byLevel[lvl];
+          expect(list.length).toBeGreaterThan(0);
+
+          let levelPy = 0;
+          let levelCy = 0;
+
+          for (const prod of list) {
+            const prodPair = metricPair(prod.totals, m);
+            const prodDelta = prodPair.cy - prodPair.py;
+            levelPy += prodPair.py;
+            levelCy += prodPair.cy;
+
+            let sumSegPy = 0;
+            let sumSegCy = 0;
+            let sumSegDelta = 0;
+            for (const seg of CUSTOMER_SEGMENTS) {
+              const sp = metricPair(prod.segments[seg], m);
+              sumSegPy += sp.py;
+              sumSegCy += sp.cy;
+              sumSegDelta += sp.cy - sp.py;
+            }
+
+            expect(Math.abs(sumSegPy - prodPair.py)).toBeLessThanOrEqual(1e-6);
+            expect(Math.abs(sumSegCy - prodPair.cy)).toBeLessThanOrEqual(1e-6);
+            expect(Math.abs(sumSegDelta - prodDelta)).toBeLessThanOrEqual(1e-6);
+
+            // Signed pp columns sum to product YoY % when product PY != 0, or are null when PY == 0
+            if (isZero(prodPair.py)) {
+              expect(prod.newAcquisitionPp).toBeNull();
+              expect(prod.expansionPp).toBeNull();
+              expect(prod.stablePp).toBeNull();
+              expect(prod.contractionExposurePp).toBeNull();
+              expect(prod.churnExposurePp).toBeNull();
+            } else {
+              const sumPp =
+                (prod.newAcquisitionPp ?? 0) +
+                (prod.expansionPp ?? 0) +
+                (prod.stablePp ?? 0) +
+                (prod.contractionExposurePp ?? 0) +
+                (prod.churnExposurePp ?? 0);
+              const expectedYoyPct = (prodDelta / Math.abs(prodPair.py)) * 100;
+              expect(Math.abs(sumPp - expectedYoyPct)).toBeLessThanOrEqual(1e-6);
+            }
+          }
+
+          // Sum across all rows at Item / Brand / Line level equals portfolio totals
+          expect(Math.abs(levelPy - portfolioTotals.py)).toBeLessThanOrEqual(1e-4);
+          expect(Math.abs(levelCy - portfolioTotals.cy)).toBeLessThanOrEqual(1e-4);
+        }
+      }
+    }
+  });
+
+  it('25. Enhancement 2: Customer-Behavior Decomposition satisfies new + expansion + contraction + lost === totalDelta and rolls up from Item to Brand/Line', () => {
+    const res = analyze(sampleDs, baseQuery());
+    const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
+    const edgeMeta = buildMeta(edgeDs);
+    const edgeRes = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability) }));
+
+    for (const r of [res, edgeRes]) {
+      for (const m of METRICS) {
+        const expByMetric = r.productExposure.byMetric[m];
+
+        for (const lvl of PRODUCT_EXPOSURE_LEVELS) {
+          for (const prod of expByMetric.byLevel[lvl]) {
+            const prodPair = metricPair(prod.totals, m);
+            const prodDelta = prodPair.cy - prodPair.py;
+            const cb = prod.customerBehavior;
+
+            const sumEffects =
+              cb.newCustomerEffect +
+              cb.expansionEffect +
+              cb.contractionEffect +
+              cb.lostCustomerEffect;
+
+            expect(Math.abs(sumEffects - cb.totalDelta)).toBeLessThanOrEqual(1e-6);
+            expect(Math.abs(cb.totalDelta - prodDelta)).toBeLessThanOrEqual(1e-6);
+
+            // Bridge waterfall reconciliation: PY + Σ step deltas === CY
+            const wf = buildProductBehaviorWaterfall(prod.totals, cb, m, r.period);
+            expect(wf.length).toBe(6);
+            const wfSum = wf
+              .filter((s) => s.kind !== 'py' && s.kind !== 'cy')
+              .reduce((acc, s) => acc + s.delta, 0);
+            expect(Math.abs(prodPair.py + wfSum - prodPair.cy)).toBeLessThanOrEqual(1e-6);
+          }
+        }
+
+        // Verify Brand and Line effects equal the sum of Item-level effects
+        const itemCbs = expByMetric.byLevel.item.map((x) => x.customerBehavior);
+        const brandCbs = expByMetric.byLevel.brand.map((x) => x.customerBehavior);
+        const lineCbs = expByMetric.byLevel.line.map((x) => x.customerBehavior);
+
+        const sumNew = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.newCustomerEffect, 0);
+        const sumExp = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.expansionEffect, 0);
+        const sumCon = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.contractionEffect, 0);
+        const sumLost = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.lostCustomerEffect, 0);
+
+        expect(Math.abs(sumNew(brandCbs) - sumNew(itemCbs))).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(sumExp(brandCbs) - sumExp(itemCbs))).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(sumCon(brandCbs) - sumCon(itemCbs))).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(sumLost(brandCbs) - sumLost(itemCbs))).toBeLessThanOrEqual(1e-6);
+
+        expect(Math.abs(sumNew(lineCbs) - sumNew(itemCbs))).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(sumExp(lineCbs) - sumExp(itemCbs))).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(sumCon(lineCbs) - sumCon(itemCbs))).toBeLessThanOrEqual(1e-6);
+        expect(Math.abs(sumLost(lineCbs) - sumLost(itemCbs))).toBeLessThanOrEqual(1e-6);
+      }
+    }
+
+    // Direct unit check on decomposeCustomerBehavior
+    const direct = decomposeCustomerBehavior(
+      [
+        { customerId: 'C1', pyQ: 0, pyV: 0, cyQ: 10, cyV: 1000 }, // New: +1000
+        { customerId: 'C2', pyQ: 20, pyV: 2000, cyQ: 35, cyV: 3500 }, // Expansion: +1500
+        { customerId: 'C3', pyQ: 30, pyV: 3000, cyQ: 20, cyV: 2000 }, // Contraction: -1000
+        { customerId: 'C4', pyQ: 15, pyV: 1500, cyQ: 0, cyV: 0 }, // Lost: -1500
+      ],
+      6500,
+      'value',
+    );
+    expect(direct.newCustomerEffect).toBe(1000);
+    expect(direct.expansionEffect).toBe(1500);
+    expect(direct.contractionEffect).toBe(-1000);
+    expect(direct.lostCustomerEffect).toBe(-1500);
+    expect(direct.totalDelta).toBe(0);
   });
 });

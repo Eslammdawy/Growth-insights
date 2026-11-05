@@ -4,8 +4,9 @@ import {
   ExportableRowItem,
   exportDefectorWatchlistToExcel,
   exportLevelTableToExcel,
+  exportProductExposureToExcel,
 } from './exportExcel';
-import { DerivedRow } from './metrics';
+import { DerivedRow, buildProductSegmentBreakdown, decomposeCustomerBehavior, emptySums } from './metrics';
 
 describe('exportLevelTableToExcel', () => {
   it('generates a valid Excel file for customer level table with unexpanded rows', () => {
@@ -327,6 +328,63 @@ describe('exportLevelTableToExcel', () => {
       ]);
       expect(dataWatch[1][1]).toBe('Lost Pharmacy');
       expect(dataWatch[2][1]).toBe('  Item A');
+    } finally {
+      appendSheetSpy.mockRestore();
+    }
+  });
+
+  it('exports Product × Customer-Segment Exposure Matrix and Customer-Behavior Decomposition to Excel', () => {
+    const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
+    try {
+      const cb = decomposeCustomerBehavior(
+        [
+          { pyQ: 0, pyV: 0, cyQ: 10, cyV: 10000 },
+          { pyQ: 50, pyV: 50000, cyQ: 70, cyV: 70000 },
+          { pyQ: 40, pyV: 40000, cyQ: 30, cyV: 30000 },
+          { pyQ: 20, pyV: 20000, cyQ: 0, cyV: 0 },
+        ],
+        110000,
+        'value',
+      );
+      const row = buildProductSegmentBreakdown({
+        itemId: 'Item:Panadol',
+        itemLabel: 'Panadol',
+        level: 'item',
+        brand: 'Panadol Brand',
+        line: 'Line 1',
+        segments: {
+          new: { pyQ: 0, pyV: 0, cyQ: 10, cyV: 10000 },
+          growing: { pyQ: 50, pyV: 50000, cyQ: 70, cyV: 70000 },
+          stable: emptySums(),
+          declining: { pyQ: 40, pyV: 40000, cyQ: 30, cyV: 30000 },
+          lost: { pyQ: 20, pyV: 20000, cyQ: 0, cyV: 0 },
+        },
+        totals: { pyQ: 110, pyV: 110000, cyQ: 110, cyV: 110000 },
+        customerBehavior: cb,
+        metric: 'value',
+      });
+
+      exportProductExposureToExcel({
+        rows: [row],
+        level: 'item',
+        period: { pyLabel: 'Q3-2025', cyLabel: 'Q3-2026' },
+        metric: 'value',
+      });
+
+      const [, wsExp, sheetExp] = appendSheetSpy.mock.calls[appendSheetSpy.mock.calls.length - 1];
+      expect(sheetExp).toBe('Item Exposure');
+      const dataExp = XLSX.utils.sheet_to_json(wsExp, { header: 1 }) as (string | number)[][];
+      expect(dataExp[0]).toContain('Item');
+      expect(dataExp[0]).toContain('Brand');
+      expect(dataExp[0]).toContain('Line');
+      expect(dataExp[0]).toContain('Lost Seg pp');
+      expect(dataExp[0]).toContain('+New Cust Effect [EGP]');
+      expect(dataExp[1][0]).toBe('Panadol');
+      expect(dataExp[1][1]).toBe('Panadol Brand');
+      expect(dataExp[1][2]).toBe('Line 1');
+      expect(dataExp[1][3]).toBe(110000);
+      expect(dataExp[1][4]).toBe(110000);
+      expect(dataExp[1][5]).toBe(0);
     } finally {
       appendSheetSpy.mockRestore();
     }

@@ -1,8 +1,8 @@
 # Worklog & Application Status (`worklog.md`)
 
-**Last Updated**: 2026-10-29
+**Last Updated**: 2026-11-05
 **Application**: Sales Growth Analyzer
-**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`26/26`), and production Vite build (`npm run build`) pass with zero errors.
+**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`29/29`), and production Vite build (`npm run build`) pass with zero errors.
 
 ---
 
@@ -112,54 +112,68 @@
 - **HPG Brand Logo in Header (`public/hpg-logo.jpg`, `src/components/TopBar.tsx`)**:
   - Copied the official **HPG (Hefny Pharma Group)** logo into `public/hpg-logo.jpg` and integrated it into the left brand section of `TopBar.tsx`.
 
+### 1.14 Product × Customer-Segment Exposure Matrix & Customer-Behavior Growth Decomposition (2026-11-05)
+- **Single-Pass Item × Customer Accumulation & Product-Side Math (`src/lib/metrics.ts`, `src/lib/aggregate.ts`)**:
+  - Extended the single-pass `analyze()` loop in `src/lib/aggregate.ts` to populate a sparse `itemCustMap` (`item * nCust + cust → Sums`), followed by a post-loop finalisation step (`buildProductExposure`) over that map (for both `value` and `units` metrics) that rolls Item breakdowns up to `Brand` (`p.itemBrand`) and `Line` (`p.itemLine`).
+  - Added pure helpers `buildProductSegmentBreakdown`, `decomposeCustomerBehavior`, `mergeCustomerBehaviorRows`, and `buildProductBehaviorWaterfall` in `src/lib/metrics.ts`.
+  - **Enhancement 1 (Exposure Matrix)**: For each `Item`, `Brand`, and `Line`, buckets each `(product, customer)` pair into the customer's overall lifecycle segment (`New`, `Growing`, `Stable`, `Declining`, `Lost`) and computes signed percentage-point contributions (`segment Δ ÷ |product PY| × 100`), guaranteeing `Σ segments.delta === product.totals.delta` and `Σ signed segment pp === product YoY %`.
+  - **Enhancement 2 (Customer-Behavior Decomposition)**: Decomposes each item's YoY Δ across its own customers into `newCustomerEffect + expansionEffect + contractionEffect + lostCustomerEffect === totalDelta` (`PY → +New → +Expansion → −Contraction → −Lost → CY`), and sums item-level effects up to Brand and Line.
+- **Interactive `ProductCustomerExposure` Component & Shared `KpiInfoTooltip` (`src/components/ProductCustomerExposure.tsx`, `src/components/KpiInfoTooltip.tsx`, `src/pages/Dashboard.tsx`)**:
+  - Extracted `KpiInfoTooltip` into `src/components/KpiInfoTooltip.tsx` and reused it across `CustomerDynamics.tsx` and `ProductCustomerExposure.tsx`.
+  - Lazy-loaded `ProductCustomerExposure.tsx` inside `#section-customer-dynamics` directly below `CustomerDynamics.tsx` with `Item` / `Brand` / `Line` level selector (`pel=`), quick-view chips (`All`, `Top 10 churn-exposed`, `Top 10 new-customer-driven` persisted via `pev=`), `Chart / Table` toggle, sortable columns with `aria-sort`, proportional 5-segment Δ bars, inline expandable 6-step Recharts bridge waterfall, and `.xlsx` export (`exportProductExposureToExcel`).
+
 ---
 
 ## 2. Codebase Inventory & Review Status
 
 | File | Role | Status |
 | :--- | :--- | :--- |
-| `src/lib/config.ts` | Constants (`EXPANDABLE_SUBTYPES = ['Chain']`, `EXCLUDED_DISTRIBUTORS`, `GROWTH_BAND`, `WATERFALL_TOP_N`, `PARETO_TOP_N`, `RETURNS_FLAG_FACTOR`, `RETURNS_MIN_GROSS`) | Updated & Verified |
+| `src/lib/config.ts` | Constants (`EXPANDABLE_SUBTYPES = ['Chain']`, `EXCLUDED_DISTRIBUTORS`, `GROWTH_BAND`, `WATERFALL_TOP_N`, `PARETO_TOP_N`, `PRODUCT_EXPOSURE_DEFAULT_LIMIT`, `RETURNS_FLAG_FACTOR`, `RETURNS_MIN_GROSS`) | Updated & Verified |
 | `src/lib/columnar.ts` | Dictionary-encoded `StrColumn` & `Float64Array` `NumColumn` dataset codec + validation | Clean |
 | `src/lib/parse.ts` | Streaming `.xlsx` parser (`fflate` + chunked XML scanner) | Clean |
 | `src/lib/periods.ts` | Quarter/Month period resolution & like-for-like month matching | Clean |
 | `src/lib/palette.ts` | Shared color-blind-safe palette tokens, `growthScaleStyle`, `contribPpScaleStyle`, and `treemapFillColor` | Updated & Verified |
-| `src/lib/metrics.ts` | `Units` & `Value` metric helpers, YoY Growth, `Contrib. %`, PVM, Customer retention/segments, and Returns helpers | Updated & Verified |
+| `src/lib/metrics.ts` | `Units` & `Value` metric helpers, YoY Growth, `Contrib. %`, PVM, Customer retention/segments, Product Exposure & Customer-Behavior decomposition, and Returns helpers | Updated & Verified |
 | `src/lib/insights.ts` | Deterministic headline builder, waterfall builder, driver ranker, and growth concentration metrics | New & Verified |
 | `src/lib/format.ts` | Number, currency (`EGP`), unit price (`fmtPrice`), signed delta, percentage, and `Contrib. %` (`fmtPp`) formatters | Updated & Verified |
-| `src/lib/aggregate.ts` | Single-pass 5-level aggregator (`subtype`, `distributor`, `chain`, `territory`, `customer`), CY item-to-line reallocation, `gross`/`grossTotals`, `customerInsights`, `insights`, `analyzeItems` | Updated & Verified |
-| `src/lib/hashState.ts` | URL hash serialization (`dlv`, `ret`, `hmm`), parsing, `DatasetMeta` validation, and `useSyncExternalStore` subscription | Updated & Verified |
-| `src/lib/exportExcel.ts` | Excel (`.xlsx`) export for `LevelTable` (`Contrib. %` + optional returns columns) and Defector Watchlist (`exportDefectorWatchlistToExcel`) | Updated & Verified |
-| `src/lib/acceptance.test.ts` | 23 Vitest acceptance, invariant, Territory×Month, Contribution, PVM, Item reallocation, Chains level, Waterfall, Customer Dynamics & Returns tests | 23/23 Passing |
-| `src/lib/exportExcel.test.ts` | 3 Vitest tests verifying `.xlsx` export headers, row calculations, and optional returns columns | 3/3 Passing |
+| `src/lib/aggregate.ts` | Single-pass 5-level aggregator (`subtype`, `distributor`, `chain`, `territory`, `customer`), CY item-to-line reallocation, `gross`/`grossTotals`, `customerInsights`, `productExposure`, `insights`, `analyzeItems` | Updated & Verified |
+| `src/lib/hashState.ts` | URL hash serialization (`dlv`, `pel`, `pev`, `ret`, `hmm`), parsing, `DatasetMeta` validation, and `useSyncExternalStore` subscription | Updated & Verified |
+| `src/lib/exportExcel.ts` | Excel (`.xlsx`) export for `LevelTable`, Defector Watchlist (`exportDefectorWatchlistToExcel`), and Product Exposure Matrix (`exportProductExposureToExcel`) | Updated & Verified |
+| `src/lib/acceptance.test.ts` | 25 Vitest acceptance, invariant, Territory×Month, Contribution, PVM, Item reallocation, Chains level, Waterfall, Customer Dynamics, Product Exposure, Customer-Behavior Decomposition & Returns tests | 25/25 Passing |
+| `src/lib/exportExcel.test.ts` | 4 Vitest tests verifying `.xlsx` export headers, row calculations, optional returns columns, and product exposure export | 4/4 Passing |
 | `src/workers/data.worker.ts` | Web Worker hosting dataset, `analyze`, `analyzeItems`, and request cancellation | Verified |
 | `src/workers/workerClient.ts` | Promise RPC wrapper for `data.worker.ts` with abort/cancellation tracking | Verified |
-| `src/store/useDashboardStore.ts` | Zustand store (`driverLevel`, `showReturns`, `heatmapMode`, `customerStatusFilter`, filters, URL hash sync) | Updated & Verified |
+| `src/store/useDashboardStore.ts` | Zustand store (`driverLevel`, `productExposureLevel`, `productExposureView`, `showReturns`, `heatmapMode`, `customerStatusFilter`, filters, URL hash sync) | Updated & Verified |
 | `src/components/TopBar.tsx` | Header with HPG logo (`public/hpg-logo.jpg`), period banner, Units/Value toggle, period controls, progress bar | Updated & Verified |
-| `src/components/Filters.tsx` | Streamlined 2-step cascading Product Filters bar (`1. Brand` → `2. Item`) with transitions | Updated & Verified |
+| `src/components/Filters.tsx` | Streamlined 2-step cascading Product Filters bar (`1. Brand` → `2. Item`) + active Line chip with transitions | Updated & Verified |
 | `src/components/DrillChips.tsx` | Active cross-filter chip bar (`SubType`, `Chain`, `Distributor`, `Territory`, `Brick`, `Customer`, `Item`) | Verified |
 | `src/components/KpiCards.tsx` | 3 KPI summary cards with live monthly CY-vs-PY mini sparklines | Verified |
+| `src/components/KpiInfoTooltip.tsx` | Accessible hover/focus formula & definition popover shared across KPI cards and table headers | New & Verified |
 | `src/components/GrowthDrivers.tsx` | Narrative headline banner, concentration/returns chips, horizontal bridge waterfall, Top-5 contributors/detractors | New & Verified |
 | `src/components/MonthChart.tsx` | Upgraded `ComposedChart`: PY/CY bars with outside-end labels + YoY % line on secondary axis, Chart/Table toggle | Verified |
 | `src/components/GrowthChart.tsx` | Top-10 horizontal YoY bar chart with shared palette, outside-end labels, Chart/Table toggle | Verified |
 | `src/components/BubbleScatterChart.tsx` | Bubble scatter (`x=PY, y=YoY%, size=CY, color=status`) with click-to-drill & Chart/Table toggle | Updated & Verified |
 | `src/components/CyTreemap.tsx` | CY Value Treemap colored by YoY growth from shared palette with click-to-drill & Treemap/Table toggle | Verified |
-| `src/components/CustomerDynamics.tsx` | 6-card retention KPI strip with interactive `KpiInfoTooltip` formula popovers, clickable 5-segment cohort bridge table, and Top-10 Lost Defector Watchlist | New & Verified |
+| `src/components/CustomerDynamics.tsx` | 4-card retention KPI strip with interactive `KpiInfoTooltip` formula popovers, clickable 5-segment cohort bridge table, and Top-10 Lost Defector Watchlist | Updated & Verified |
+| `src/components/ProductCustomerExposure.tsx` | Product × Customer-Segment Exposure Matrix (`Item` / `Brand` / `Line`) with quick-view chips, proportional segment Δ bars, expandable Customer-Behavior Decomposition waterfall, and `.xlsx` export | New & Verified |
 | `src/components/TableJumpBar.tsx` | Sticky in-page navigation bar (`Filters / Top · Drivers · Insights · SubType · Distributor · Chains · Territory · Customer Dynamics · Customer`) | Updated & Verified |
 | `src/components/ErrorBoundary.tsx` | React error boundary component with retry support for charts and tables | Verified |
 | `src/components/LevelTable.tsx` | Virtualized 5-level table (`SubType`, `Distributor`, `Chains`, `Territory`, `Customer`) with `Contrib. %` diverging bars, `.xlsx` export, optional `Returns %` column & flags, and 5-segment customer filter | Updated & Verified |
-| `src/pages/Dashboard.tsx` | Main page layout assembling header, product filters, KPIs, `#section-drivers`, primary charts, `#section-insights`, `#section-customer-dynamics`, and 5 stacked level tables | Updated & Verified |
+| `src/pages/Dashboard.tsx` | Main page layout assembling header, product filters, KPIs, `#section-drivers`, primary charts, `#section-insights`, `#section-customer-dynamics` (`CustomerDynamics` + `ProductCustomerExposure`), and 5 stacked level tables | Updated & Verified |
 
 ---
 
 ## 3. Verification Results & Bundle Size Deltas
 
 - **TypeScript Check (`npm run typecheck`)**: Passed (`0` errors).
-- **Automated Tests (`npm run test`)**: Passed (`26/26` tests across `src/lib/acceptance.test.ts` (23 tests) and `src/lib/exportExcel.test.ts` (3 tests)).
-- **Production Build (`npm run build`)**: Passed cleanly in `5.55s` with zero new runtime dependencies. Lazy-loaded chunk sizes:
-  - `GrowthDrivers-*.js`: `22.29 kB` (`6.70 kB` gzip)
-  - `CustomerDynamics-*.js`: `25.42 kB` (`6.20 kB` gzip)
+- **Automated Tests (`npm run test`)**: Passed (`29/29` tests across `src/lib/acceptance.test.ts` (25 tests) and `src/lib/exportExcel.test.ts` (4 tests)).
+- **Production Build (`npm run build`)**: Passed cleanly in `6.21s` with zero new runtime dependencies. Lazy-loaded chunk sizes:
+  - `GrowthDrivers-*.js`: `22.33 kB` (`6.71 kB` gzip)
+  - `CustomerDynamics-*.js`: `21.24 kB` (`5.45 kB` gzip)
+  - `ProductCustomerExposure-*.js`: `29.86 kB` (`7.67 kB` gzip)
+  - `KpiInfoTooltip-*.js`: `2.52 kB` (`1.11 kB` gzip)
   - `MonthChart-*.js`: `31.65 kB` (`8.94 kB` gzip)
-  - `CyTreemap-*.js`: `31.43 kB` (`10.91 kB` gzip)
+  - `CyTreemap-*.js`: `31.41 kB` (`10.89 kB` gzip)
   - `BubbleScatterChart-*.js`: `10.55 kB` (`3.37 kB` gzip)
-  - `GrowthChart-*.js`: `8.46 kB` (`2.95 kB` gzip)
-  - `data.worker-*.js`: `37.19 kB`
+  - `GrowthChart-*.js`: `8.50 kB` (`2.96 kB` gzip)
+  - `data.worker-*.js`: `40.67 kB`

@@ -1,6 +1,17 @@
 import * as XLSX from 'xlsx';
 import { GroupRow, Level } from './aggregate';
-import { DerivedRow, Metric, Sums, contributionPp, returnsRatePct } from './metrics';
+import {
+  DerivedRow,
+  Metric,
+  PRODUCT_EXPOSURE_LEVEL_LABEL,
+  ProductExposureLevel,
+  ProductSegmentBreakdown,
+  Sums,
+  contributionPp,
+  deriveRow,
+  metricPair,
+  returnsRatePct,
+} from './metrics';
 
 export interface ExportableRowItem {
   kind: 'row' | 'chain' | 'item' | 'status';
@@ -423,4 +434,189 @@ export function exportDefectorWatchlistToExcel({
   XLSX.utils.book_append_sheet(wb, ws, 'Defector Watchlist');
   saveWorkbook(wb, `HPG_Defector_Watchlist_${period.cyLabel}_${metric}.xlsx`);
 }
+
+export interface ExportProductExposureOptions {
+  rows: ProductSegmentBreakdown[];
+  level: ProductExposureLevel;
+  viewLabel?: string;
+  period: { pyLabel: string; cyLabel: string };
+  metric: Metric;
+}
+
+/**
+ * Exports the Product × Customer-Segment Exposure Matrix and Customer-Behavior Decomposition
+ * for the selected level (Item / Brand / Line) to Excel.
+ */
+export function exportProductExposureToExcel({
+  rows,
+  level,
+  viewLabel,
+  period,
+  metric,
+}: ExportProductExposureOptions): void {
+  const wb = XLSX.utils.book_new();
+  const metricSuffix = metric === 'units' ? 'Units' : 'EGP';
+  const levelLabel = PRODUCT_EXPOSURE_LEVEL_LABEL[level];
+
+  const prefixHeaders =
+    level === 'item'
+      ? ['Item', 'Brand', 'Line']
+      : level === 'brand'
+        ? ['Brand', 'Line']
+        : ['Line'];
+
+  const metricHeaders = [
+    `PY (${period.pyLabel}) [${metricSuffix}]`,
+    `CY (${period.cyLabel}) [${metricSuffix}]`,
+    `YoY Δ [${metricSuffix}]`,
+    'YoY %',
+    `New Seg Δ [${metricSuffix}]`,
+    'New Seg pp',
+    `Growing Seg Δ [${metricSuffix}]`,
+    'Growing Seg pp',
+    `Stable Seg Δ [${metricSuffix}]`,
+    'Stable Seg pp',
+    `Declining Seg Δ [${metricSuffix}]`,
+    'Declining Seg pp',
+    `Lost Seg Δ [${metricSuffix}]`,
+    'Lost Seg pp',
+    `+New Cust Effect [${metricSuffix}]`,
+    '+New Cust pp',
+    `+Expansion Effect [${metricSuffix}]`,
+    '+Expansion pp',
+    `−Contraction Effect [${metricSuffix}]`,
+    '−Contraction pp',
+    `−Lost Cust Effect [${metricSuffix}]`,
+    '−Lost Cust pp',
+  ];
+
+  const headers = [...prefixHeaders, ...metricHeaders];
+  const pLen = prefixHeaders.length;
+
+  const ppCell = (pp: number | null): number | string =>
+    pp !== null && Number.isFinite(pp) ? pp : '–';
+
+  const segDelta = (r: ProductSegmentBreakdown, seg: 'new' | 'growing' | 'stable' | 'declining' | 'lost') => {
+    const p = metricPair(r.segments[seg], metric);
+    return p.cy - p.py;
+  };
+
+  const dataRows: (string | number)[][] = [];
+
+  for (const r of rows) {
+    const d = deriveRow(r.totals, metric);
+    let growthVal: number | string;
+    if (d.growth.kind === 'pct') {
+      growthVal = d.growth.value;
+    } else if (d.growth.kind === 'lost') {
+      growthVal = -1.0;
+    } else if (d.growth.kind === 'new') {
+      growthVal = 'New';
+    } else {
+      growthVal = '–';
+    }
+
+    const prefix =
+      level === 'item'
+        ? [r.itemLabel, r.brand ?? '', r.line ?? '']
+        : level === 'brand'
+          ? [r.itemLabel, r.line ?? '']
+          : [r.itemLabel];
+
+    const cb = r.customerBehavior;
+    dataRows.push([
+      ...prefix,
+      d.py,
+      d.cy,
+      d.delta,
+      growthVal,
+      segDelta(r, 'new'),
+      ppCell(r.newAcquisitionPp),
+      segDelta(r, 'growing'),
+      ppCell(r.expansionPp),
+      segDelta(r, 'stable'),
+      ppCell(r.stablePp),
+      segDelta(r, 'declining'),
+      ppCell(r.contractionExposurePp),
+      segDelta(r, 'lost'),
+      ppCell(r.churnExposurePp),
+      cb.newCustomerEffect,
+      ppCell(cb.newPp),
+      cb.expansionEffect,
+      ppCell(cb.expansionPp),
+      cb.contractionEffect,
+      ppCell(cb.contractionPp),
+      cb.lostCustomerEffect,
+      ppCell(cb.lostPp),
+    ]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+
+  const pyCol = pLen;
+  const cyCol = pLen + 1;
+  const deltaCol = pLen + 2;
+  const growthCol = pLen + 3;
+  // Pairs of (deltaCol, ppCol) starting at pLen + 4 (9 pairs = 18 cols)
+  const signedDeltaCols = [
+    deltaCol,
+    pLen + 4,
+    pLen + 6,
+    pLen + 8,
+    pLen + 10,
+    pLen + 12,
+    pLen + 14,
+    pLen + 16,
+    pLen + 18,
+    pLen + 20,
+  ];
+  const ppCols = [
+    pLen + 5,
+    pLen + 7,
+    pLen + 9,
+    pLen + 11,
+    pLen + 13,
+    pLen + 15,
+    pLen + 17,
+    pLen + 19,
+    pLen + 21,
+  ];
+
+  for (let R = 1; R <= range.e.r; ++R) {
+    const pyC = ws[XLSX.utils.encode_cell({ r: R, c: pyCol })];
+    if (pyC && typeof pyC.v === 'number') pyC.z = '#,##0';
+
+    const cyC = ws[XLSX.utils.encode_cell({ r: R, c: cyCol })];
+    if (cyC && typeof cyC.v === 'number') cyC.z = '#,##0';
+
+    const grC = ws[XLSX.utils.encode_cell({ r: R, c: growthCol })];
+    if (grC && typeof grC.v === 'number') grC.z = '+0.0%;-0.0%;0.0%';
+
+    for (const cIdx of signedDeltaCols) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: cIdx })];
+      if (cell && typeof cell.v === 'number') cell.z = '+#,##0;-#,##0;0';
+    }
+    for (const cIdx of ppCols) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: cIdx })];
+      if (cell && typeof cell.v === 'number') cell.z = '+0.00"%";-0.00"%";0.00"%"';
+    }
+  }
+
+  ws['!cols'] = headers.map((h, i) => {
+    let maxLen = h.length;
+    for (const r of dataRows) {
+      const val = r[i];
+      if (val !== null && val !== undefined) {
+        maxLen = Math.max(maxLen, String(val).length);
+      }
+    }
+    return { wch: Math.min(50, Math.max(12, maxLen + 3)) };
+  });
+
+  const sheetTitle = `${levelLabel} Exposure${viewLabel ? ` (${viewLabel})` : ''}`.slice(0, 31);
+  XLSX.utils.book_append_sheet(wb, ws, sheetTitle);
+  saveWorkbook(wb, `HPG_Product_Exposure_${levelLabel}_${period.cyLabel}_${metric}.xlsx`);
+}
+
 
