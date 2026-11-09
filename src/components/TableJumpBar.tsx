@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUp, Compass, Layers, Sparkles } from 'lucide-react';
+import { ArrowUp, Compass, Layers } from 'lucide-react';
 import { LEVEL_LABEL, TABLE_LEVELS, Level } from '../lib/aggregate';
 
 const JUMP_PILL_STYLE: Record<Level, string> = {
@@ -23,6 +23,13 @@ export const TableJumpBar: React.FC = () => {
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+  };
+
+  const jumpToLevel = (lvl: Level) => {
+    window.dispatchEvent(new CustomEvent('expand-level', { detail: lvl }));
+    requestAnimationFrame(() => {
+      scrollToElement(`table-${lvl}`);
+    });
   };
 
   return (
@@ -53,14 +60,6 @@ export const TableJumpBar: React.FC = () => {
             <Compass className="h-3 w-3" />
             Drivers
           </button>
-          <button
-            type="button"
-            onClick={() => scrollToElement('section-insights')}
-            className="inline-flex items-center gap-1 rounded-xl border border-violet-500/35 bg-violet-500/10 px-3 py-1 font-bold text-violet-800 shadow-sm transition-all hover:bg-violet-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-violet-200 dark:hover:bg-violet-600"
-          >
-            <Sparkles className="h-3 w-3" />
-            Insights
-          </button>
           {TABLE_LEVELS.map((lvl) => (
             <React.Fragment key={lvl}>
               {lvl === 'customer' && (
@@ -74,7 +73,7 @@ export const TableJumpBar: React.FC = () => {
               )}
               <button
                 type="button"
-                onClick={() => scrollToElement(`table-${lvl}`)}
+                onClick={() => jumpToLevel(lvl)}
                 className={`rounded-xl border px-3 py-1 font-bold shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${JUMP_PILL_STYLE[lvl]}`}
               >
                 {LEVEL_LABEL[lvl]}
@@ -84,7 +83,7 @@ export const TableJumpBar: React.FC = () => {
         </div>
       </div>
       <span className="hidden rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 md:inline">
-        Visual insights + 5 levels stacked
+        5 levels stacked
       </span>
     </nav>
   );

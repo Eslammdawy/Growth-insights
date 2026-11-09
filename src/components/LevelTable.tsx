@@ -31,6 +31,7 @@ import {
   returnsRatePct,
 } from '../lib/metrics';
 import { StatusFilter, useDashboardStore } from '../store/useDashboardStore';
+import { TerritoryBrandMix } from './TerritoryBrandMix';
 
 type SortId = 'label' | 'py' | 'cy' | 'delta' | 'growth' | 'contrib' | 'returns';
 
@@ -494,9 +495,21 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   const setStatus = level === 'customer' ? setCustomerStatusFilter : setLocalStatus;
   const [topN, setTopN] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [exporting, setExporting] = useState(false);
   const targets = useRef(new Map<string, ItemTarget>());
+
+  // Auto-expand when user jumps to this level from the jump bar
+  useEffect(() => {
+    const onExpand = (e: Event) => {
+      const ce = e as CustomEvent<Level>;
+      if (ce.detail === level) {
+        setCollapsed(false);
+      }
+    };
+    window.addEventListener('expand-level', onExpand);
+    return () => window.removeEventListener('expand-level', onExpand);
+  }, [level]);
 
   const rowList = rows ?? [];
   const totalPy = totals ? (metric === 'units' ? totals.pyQ : totals.pyV) : 0;
@@ -989,6 +1002,11 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
               </tr>
             </tfoot>
           </table>
+        </div>
+      )}
+      {!collapsed && level === 'territory' && (
+        <div className="px-3 pb-3">
+          <TerritoryBrandMix />
         </div>
       )}
     </section>

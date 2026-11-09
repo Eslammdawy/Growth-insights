@@ -1065,4 +1065,45 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(direct.lostCustomerEffect).toBe(-1500);
     expect(direct.totalDelta).toBe(0);
   });
+
+  it('26. Territory Brand Mix, Similarity Matrix & Chi-Square test of independence', () => {
+    const res = analyze(sampleDs, baseQuery());
+    expect(res.territoryBrandMatrix).toBeDefined();
+    const tbm = res.territoryBrandMatrix!;
+    expect(tbm.territories.length).toBeGreaterThan(1);
+    expect(tbm.brands.length).toBeGreaterThan(1);
+    expect(tbm.matrix.length).toBe(tbm.territories.length);
+
+    // Verify row sums and column sums
+    for (let i = 0; i < tbm.territories.length; i++) {
+      expect(tbm.matrix[i].length).toBe(tbm.brands.length);
+      const rowSum = tbm.matrix[i].reduce((a, b) => a + b, 0);
+      expect(rowSum).toBeCloseTo(tbm.territoryTotals[i], 4);
+    }
+    for (let j = 0; j < tbm.brands.length; j++) {
+      let colSum = 0;
+      for (let i = 0; i < tbm.territories.length; i++) {
+        colSum += tbm.matrix[i][j];
+      }
+      expect(colSum).toBeCloseTo(tbm.brandTotals[j], 4);
+    }
+
+    // Similarity matrix
+    expect(res.territorySimilarity).toBeDefined();
+    const sim = res.territorySimilarity!;
+    expect(sim.cosine.length).toBe(tbm.territories.length);
+    for (let i = 0; i < tbm.territories.length; i++) {
+      expect(sim.cosine[i][i]).toBe(1);
+    }
+    expect(sim.topPairs.length).toBeGreaterThan(0);
+    expect(sim.bottomPairs.length).toBeGreaterThan(0);
+
+    // Chi-Square test
+    expect(res.chiSquareTest).toBeDefined();
+    const cs = res.chiSquareTest!;
+    expect(cs.dof).toBe((tbm.territories.length - 1) * (tbm.brands.length - 1));
+    expect(cs.cramersV).toBeGreaterThanOrEqual(0);
+    expect(cs.cramersV).toBeLessThanOrEqual(1);
+    expect(typeof cs.interpretation).toBe('string');
+  });
 });

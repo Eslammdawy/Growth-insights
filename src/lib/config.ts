@@ -89,3 +89,6 @@ export const PRODUCT_EXPOSURE_DEFAULT_LIMIT = 25; // initial rows in Product Exp
 export const RETURNS_FLAG_FACTOR = 1.5;   // > 1.5× portfolio rate flags a row
 export const RETURNS_MIN_GROSS = 10_000;  // EGP gross floor before flagging
 
+/** Minimum territory net value (EGP) for brand-mix analysis (filters out noise from tiny territories). */
+export const MIN_TERRITORY_VALUE = 1000;
+

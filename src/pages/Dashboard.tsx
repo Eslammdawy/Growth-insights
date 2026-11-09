@@ -1,5 +1,5 @@
-import React, { Suspense, useEffect, useState, useSyncExternalStore } from 'react';
-import { AlertCircle, ChevronDown, ChevronUp, Database, Loader2, Sparkles } from 'lucide-react';
+import React, { Suspense, useEffect, useSyncExternalStore } from 'react';
+import { AlertCircle, Database, Loader2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { DrillChips } from '../components/DrillChips';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -21,12 +21,6 @@ const MonthChart = React.lazy(() =>
 const GrowthChart = React.lazy(() =>
   import('../components/GrowthChart').then((m) => ({ default: m.GrowthChart }))
 );
-const BubbleScatterChart = React.lazy(() =>
-  import('../components/BubbleScatterChart').then((m) => ({ default: m.BubbleScatterChart }))
-);
-const CyTreemap = React.lazy(() =>
-  import('../components/CyTreemap').then((m) => ({ default: m.CyTreemap }))
-);
 const CustomerDynamics = React.lazy(() =>
   import('../components/CustomerDynamics').then((m) => ({ default: m.CustomerDynamics }))
 );
@@ -47,8 +41,6 @@ function ChartSkeleton() {
 }
 
 export const Dashboard: React.FC = () => {
-  const [insightsOpen, setInsightsOpen] = useState(true);
-
   const {
     meta,
     result,
@@ -184,69 +176,6 @@ export const Dashboard: React.FC = () => {
                   </Suspense>
                 </ErrorBoundary>
               </div>
-
-              {/* Collapsible Visual Insights Section */}
-              <section
-                id="section-insights"
-                aria-label="Visual Insights"
-                className="space-y-3 scroll-mt-28"
-              >
-                <div className="glass-panel flex items-center justify-between rounded-2xl border border-indigo-200/70 bg-gradient-to-r from-indigo-50/80 via-violet-50/50 to-cyan-50/50 px-3.5 py-2 dark:border-slate-800/80 dark:from-slate-900/90 dark:via-indigo-950/40 dark:to-slate-900/90">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setInsightsOpen((o) => !o)}
-                      aria-expanded={insightsOpen}
-                      aria-controls="insights-grid"
-                      title={insightsOpen ? 'Collapse visual insights' : 'Expand visual insights'}
-                      className="rounded-lg p-1 text-indigo-600 hover:bg-indigo-500/15 dark:text-indigo-300 dark:hover:bg-slate-800"
-                    >
-                      {insightsOpen ? (
-                        <ChevronUp className="h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4" />
-                      )}
-                    </button>
-                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 py-0.5 text-xs font-extrabold tracking-wide text-white shadow-sm">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      Visual Insights
-                    </span>
-                    <span className="hidden text-xs font-medium text-slate-600 dark:text-slate-300 sm:inline">
-                      Bubble Scatter · CY Value Treemap
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setInsightsOpen((o) => !o)}
-                    className="rounded-xl bg-indigo-500/10 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-500/20 dark:text-indigo-300"
-                  >
-                    {insightsOpen ? 'Hide insights' : 'Show insights'}
-                  </button>
-                </div>
-
-                {insightsOpen && (
-                  <div
-                    id="insights-grid"
-                    className={`space-y-3 transition-opacity duration-200 ${
-                      analyzing ? 'pointer-events-none opacity-60' : 'opacity-100'
-                    }`}
-                  >
-                    {/* Row 1: Bubble Scatter + CY Value Treemap */}
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                      <ErrorBoundary title="PY vs YoY % Bubble Scatter">
-                        <Suspense fallback={<ChartSkeleton />}>
-                          <BubbleScatterChart />
-                        </Suspense>
-                      </ErrorBoundary>
-                      <ErrorBoundary title="CY Value Treemap">
-                        <Suspense fallback={<ChartSkeleton />}>
-                          <CyTreemap />
-                        </Suspense>
-                      </ErrorBoundary>
-                    </div>
-                  </div>
-                )}
-              </section>
 
               {/* In-page jump bar */}
               <TableJumpBar />

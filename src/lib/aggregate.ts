@@ -15,10 +15,12 @@
 import {
   EXCLUDED_DISTRIBUTORS,
   EXPANDABLE_SUBTYPES,
+  MIN_TERRITORY_VALUE,
   TxType,
   UNASSIGNED_CHAIN_LABEL,
   UNASSIGNED_LABEL,
 } from './config';
+import { chiSquareIndependence, cosineSimilarityMatrix } from './stats';
 import { Dataset, StrColumn, numCol, strCol } from './columnar';
 import {
   CUSTOMER_SEGMENTS,
@@ -224,6 +226,26 @@ export interface AnalysisResult {
   lines: LineSummary[];
   linesTotal: Sums;
   matchedRows: number;
+  territoryBrandMatrix?: {
+    territories: string[];      // labels, sorted by territory total desc
+    brands: string[];          // labels, sorted by brand total desc
+    matrix: number[][];        // [territory][brand] = net value (Sales − Returns)
+    territoryTotals: number[]; // row sums
+    brandTotals: number[];     // column sums
+  };
+  territorySimilarity?: {
+    cosine: number[][];        // [nTerr][nTerr], symmetric, diagonal = 1
+    topPairs: { a: string; b: string; sim: number }[]; // top 10 most-similar
+    bottomPairs: { a: string; b: string; sim: number }[]; // top 10 least-similar
+  };
+  chiSquareTest?: {
+    chi2: number;
+    dof: number;
+    pValue: number;
+    isSignificant: boolean;     // pValue < 0.05
+    cramersV: number;           // sqrt(chi2 / (n * (min(r, c) − 1)))
+    interpretation: string;     // one-line plain-English summary
+  };
 }
 
 /** Identifies the table row whose Item breakdown is requested. */
@@ -890,6 +912,8 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const monthAcc = new Float64Array(13 * 4);
   const nTerr = c.territory.dict.length;
   const terrMonthAcc = new Float64Array(nTerr * 13 * 4);
+  const nBrand = c.brand.dict.length;
+  const terrBrandAcc = new Float64Array(nTerr * nBrand);
   const nItem = c.item.dict.length;
   const itemAcc = new Float64Array(nItem * 4);
   const itemGrossAcc = new Float64Array(nItem * 4);
@@ -999,6 +1023,9 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
       if (isSales) {
         grossTotals.cyQ += q;
         grossTotals.cyV += v;
+      }
+      if (t > 0 && b > 0) {
+        terrBrandAcc[t * nBrand + b] += v;
       }
     } else {
       totals.pyQ += q;
@@ -1278,6 +1305,127 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     itemCustMap,
   );
 
+  // Territory x Brand matrix and statistical similarity
+  let territoryBrandMatrix: AnalysisResult['territoryBrandMatrix'];
+  let territorySimilarity: AnalysisResult['territorySimilarity'];
+  let chiSquareTest: AnalysisResult['chiSquareTest'];
+
+  // 1. Calculate row sums for territories (skip code 0)
+  const rawTerrTotals = new Float64Array(nTerr);
+  for (let t = 1; t < nTerr; t++) {
+    let sum = 0;
+    const base = t * nBrand;
+    for (let b = 1; b < nBrand; b++) {
+      sum += terrBrandAcc[base + b];
+    }
+    rawTerrTotals[t] = sum;
+  }
+
+  // Filter territories: total >= MIN_TERRITORY_VALUE
+  const validTerrCodes: number[] = [];
+  for (let t = 1; t < nTerr; t++) {
+    if (rawTerrTotals[t] >= MIN_TERRITORY_VALUE) {
+      validTerrCodes.push(t);
+    }
+  }
+
+  // 2. Calculate column sums for brands across valid territories
+  const rawBrandTotals = new Float64Array(nBrand);
+  for (const t of validTerrCodes) {
+    const base = t * nBrand;
+    for (let b = 1; b < nBrand; b++) {
+      rawBrandTotals[b] += terrBrandAcc[base + b];
+    }
+  }
+
+  // Filter brands: total > 0 (exclude zero-total brands)
+  const validBrandCodes: number[] = [];
+  for (let b = 1; b < nBrand; b++) {
+    if (rawBrandTotals[b] > 0) {
+      validBrandCodes.push(b);
+    }
+  }
+
+  // Sort territories descending by total
+  validTerrCodes.sort((a, b) => rawTerrTotals[b] - rawTerrTotals[a]);
+  // Sort brands descending by total
+  validBrandCodes.sort((a, b) => rawBrandTotals[b] - rawBrandTotals[a]);
+
+  const nValidTerr = validTerrCodes.length;
+  const nValidBrand = validBrandCodes.length;
+
+  if (nValidTerr > 0 && nValidBrand > 0) {
+    const matrix: number[][] = Array.from({ length: nValidTerr }, () => new Array<number>(nValidBrand).fill(0));
+    const territoryTotals: number[] = new Array<number>(nValidTerr).fill(0);
+    const brandTotals: number[] = new Array<number>(nValidBrand).fill(0);
+
+    for (let i = 0; i < nValidTerr; i++) {
+      const t = validTerrCodes[i];
+      const base = t * nBrand;
+      let rSum = 0;
+      for (let j = 0; j < nValidBrand; j++) {
+        const b = validBrandCodes[j];
+        const val = terrBrandAcc[base + b];
+        matrix[i][j] = val;
+        rSum += val;
+        brandTotals[j] += val;
+      }
+      territoryTotals[i] = rSum;
+    }
+
+    const terrLabels = validTerrCodes.map((t) => c.territory.dict[t]);
+    const brandLabels = validBrandCodes.map((b) => c.brand.dict[b]);
+
+    territoryBrandMatrix = {
+      territories: terrLabels,
+      brands: brandLabels,
+      matrix,
+      territoryTotals,
+      brandTotals,
+    };
+
+    if (nValidTerr >= 2) {
+      const cosine = cosineSimilarityMatrix(matrix);
+      const pairs: { a: string; b: string; sim: number }[] = [];
+      for (let i = 0; i < nValidTerr; i++) {
+        for (let j = i + 1; j < nValidTerr; j++) {
+          pairs.push({
+            a: terrLabels[i],
+            b: terrLabels[j],
+            sim: cosine[i][j],
+          });
+        }
+      }
+      const sortedDesc = [...pairs].sort((p1, p2) => p2.sim - p1.sim);
+      const sortedAsc = [...pairs].sort((p1, p2) => p1.sim - p2.sim);
+      const topPairs = sortedDesc.slice(0, 10);
+      const bottomPairs = sortedAsc.slice(0, 10);
+
+      territorySimilarity = {
+        cosine,
+        topPairs,
+        bottomPairs,
+      };
+    }
+
+    if (nValidTerr >= 2 && nValidBrand >= 2) {
+      const cs = chiSquareIndependence(matrix);
+      const isSignificant = cs.pValue < 0.05;
+      const interpretation = isSignificant
+        ? `Territories do NOT share the same brand mix (p < 0.05, Cramér's V = ${cs.cramersV.toFixed(2)}). Association is significant.`
+        : `No significant evidence that territories differ in brand mix (p ≥ 0.05).`;
+
+      chiSquareTest = {
+        chi2: cs.chi2,
+        dof: cs.dof,
+        pValue: cs.pValue,
+        isSignificant,
+        cramersV: cs.cramersV,
+        interpretation,
+      };
+    }
+  }
+
   return {
     period,
     totals,
@@ -1292,6 +1440,9 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     lines,
     linesTotal,
     matchedRows: matched,
+    territoryBrandMatrix,
+    territorySimilarity,
+    chiSquareTest,
   };
 }
 
