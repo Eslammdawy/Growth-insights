@@ -24,6 +24,7 @@ export type Column = StrColumn | NumColumn;
 export interface Dataset {
   rowCount: number;
   columns: Column[];
+  source?: string;
 }
 
 export type DataErrorKind = 'missing-columns' | 'bad-date' | 'empty' | 'format';
@@ -294,6 +295,7 @@ export function decodeDataset(obj: unknown): Dataset {
   const o = obj as {
     format?: string;
     rowCount?: number;
+    source?: string;
     columns?: { name: string; type: string; dict?: string[]; codes?: number[]; values?: (number | null)[] }[];
   };
   if (!o || o.format !== FORMAT_ID || !Array.isArray(o.columns) || typeof o.rowCount !== 'number') {
@@ -312,7 +314,7 @@ export function decodeDataset(obj: unknown): Dataset {
     for (let i = 0; i < rowCount; i++) values[i] = src[i] === null ? NaN : (src[i] as number);
     return { kind: 'num', name: c.name, values };
   });
-  return { rowCount, columns };
+  return { rowCount, columns, source: o.source };
 }
 
 /** Transferable buffers of a dataset (for postMessage). */

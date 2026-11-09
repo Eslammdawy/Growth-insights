@@ -127,7 +127,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       currentDataset = ds;
       prepare(ds);
       const meta = buildMeta(ds);
-      send({ id: msg.id, type: 'loaded', meta, sourceName: 'Q3-2026 Sample Data (494k rows)' });
+      send({ id: msg.id, type: 'loaded', meta, sourceName: ds.source || 'HPG Sales (CY 2026 + PY 2025)' });
     } else if (msg.type === 'load-file') {
       const file = msg.file;
       const lower = file.name.toLowerCase();
