@@ -9,8 +9,8 @@
  *
  * Item-to-Line reallocation: every row of an Item is attributed to the Line (and Brand) recorded in
  * that item's latest period in the Current Year (e.g. Sep 202609 first, falling back to earlier CY months
- * if the item had no Sep invoice). Items that are not allocated to any Line in CY are excluded globally
- * from the report.
+ * if the item had no Sep invoice). If an item has no CY invoices, it falls back to its latest period
+ * in PY so that all products are counted whether they have sales in CY or not.
  */
 import {
   EXCLUDED_DISTRIBUTORS,
@@ -412,8 +412,8 @@ export function prepare(ds: Dataset): Prepared {
     rawBrand,
   );
 
-  // Effective Line & Brand columns (remapped to the item's latest CY structure);
-  // rows whose item has no CY Line allocation are excluded from the report (tx[i] = 0).
+  // Effective Line & Brand columns (remapped to the item's latest structure, falling back to PY);
+  // rows whose item has no allocated line fall back to raw line/brand, or are excluded if line is missing (tx[i] = 0).
   const effLine = new Int32Array(n);
   const effBrand = new Int32Array(n);
   for (let i = 0; i < n; i++) {
@@ -422,6 +422,9 @@ export function prepare(ds: Dataset): Prepared {
     if (l > 0) {
       effLine[i] = l;
       effBrand[i] = brandOfItem[it] >= 0 ? brandOfItem[it] : rawBrand.codes[i];
+    } else if (rawLine.codes[i] > 0) {
+      effLine[i] = rawLine.codes[i];
+      effBrand[i] = rawBrand.codes[i];
     } else {
       tx[i] = 0;
     }
@@ -492,10 +495,12 @@ export function prepare(ds: Dataset): Prepared {
 }
 
 /**
- * Item-to-Line & Brand allocation from each item's latest period in the Current Year
- * (e.g. Sep 202609 first, falling back to earlier CY months such as 202608/202607 if the item had no Sep invoice).
+ * Item-to-Line & Brand allocation:
+ * Attribution is taken from each item's latest period in the Current Year (e.g. Sep 202609 first,
+ * falling back to earlier CY months if the item had no Sep invoice).
+ * If the item has no CY sales, it falls back to its latest period in PY (or overall latest period)
+ * so that every product is counted whether it has sales in CY or not.
  * Ties within that period -> value with most rows, then first seen.
- * Items that do not appear in any Line in CY get `lineOfItem[it] = -1` and are excluded from the report.
  */
 function computeItemAllocations(
   n: number,
@@ -509,15 +514,27 @@ function computeItemAllocations(
 ): { lineOfItem: Int32Array; brandOfItem: Int32Array } {
   const nItem = item.dict.length;
   const latestCy = new Float64Array(nItem).fill(-Infinity);
+  const latestAny = new Float64Array(nItem).fill(-Infinity);
+
   for (let i = 0; i < n; i++) {
     if (!tx[i]) continue;
     const it = item.codes[i];
     if (it === 0 || line.codes[i] === 0) continue;
     const d = date[periodIdx[i]];
+    if (d > latestAny[it]) {
+      latestAny[it] = d;
+    }
     if (yearOf(d) === cyYear && d > latestCy[it]) {
       latestCy[it] = d;
     }
   }
+
+  // Target period: CY if present, otherwise fallback to latest PY/overall period
+  const targetPeriod = new Float64Array(nItem);
+  for (let it = 0; it < nItem; it++) {
+    targetPeriod[it] = latestCy[it] > -Infinity ? latestCy[it] : latestAny[it];
+  }
+
   const lineCount = new Map<number, Map<number, number>>();
   const brandCount = new Map<number, Map<number, number>>();
   const bump = (m: Map<number, Map<number, number>>, it: number, k: number) => {
@@ -529,7 +546,7 @@ function computeItemAllocations(
     if (!tx[i]) continue;
     const it = item.codes[i];
     if (it === 0 || line.codes[i] === 0) continue;
-    if (date[periodIdx[i]] === latestCy[it]) {
+    if (date[periodIdx[i]] === targetPeriod[it]) {
       bump(lineCount, it, line.codes[i]);
       bump(brandCount, it, brand.codes[i]);
     }

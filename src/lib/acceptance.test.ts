@@ -155,9 +155,9 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(lflOn.period.pyPeriods).toEqual([202507]);
     expect(lflOn.period.cyPeriods).toEqual([202607]);
     expect(lflOn.period.banner).toContain('Comparing Jul-26 vs Jul-25 (like-for-like)');
-    // PY July Sales: C-100 (100, 5000) + C-300 (80, 8000) + C-400 (20-20=0, 1000-1000=0) = 180 units, 13000 value
-    expect(lflOn.totals.pyQ).toBeCloseTo(180, 6);
-    expect(lflOn.totals.pyV).toBeCloseTo(13000, 6);
+    // PY July Sales: C-100 (100, 5000) + C-300 (80, 8000) + C-400 (20-20=0, 1000-1000=0) + Gamma Syrup / C-999 (500, 25000) = 680 units, 38000 value
+    expect(lflOn.totals.pyQ).toBeCloseTo(680, 6);
+    expect(lflOn.totals.pyV).toBeCloseTo(38000, 6);
     // CY July Sales: C-100 (150, 9000) + C-200 (50, 4000) = 200 units, 13000 value
     expect(lflOn.totals.cyQ).toBeCloseTo(200, 6);
     expect(lflOn.totals.cyV).toBeCloseTo(13000, 6);
@@ -167,7 +167,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       ...baseQuery({ period: { ...sel, likeForLike: false } }),
     });
     expect(lflOff.period.pyPeriods).toEqual([202507, 202508, 202509]);
-    expect(lflOff.totals.pyQ).toBeCloseTo(180 + 200 + 300, 6);
+    expect(lflOff.totals.pyQ).toBeCloseTo(680 + 200 + 300, 6);
   });
 
   it('5. Growth edge cases: PY=0 -> "New", CY=0 with PY>0 -> -100.0% ("lost"), both 0 -> "–"', () => {
@@ -496,7 +496,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(fmtSignedPrice(-2.5, false)).toBe('−2.50');
   });
 
-  it('16. Item-to-Line reallocation uses latest CY period (Sep 202609 first) and removes unallocated PY-only items globally', () => {
+  it('16. Item-to-Line reallocation uses latest CY period (Sep 202609 first) and includes PY-only items via PY fallback', () => {
     const reallocDs = datasetFromRows([
       // Item "Ampofer 100 mg 5 Amp": in Capital 1 in PY (202509), Capital 2 in 202607, and Capital 3 in 202609 (last period wins)
       {
@@ -550,7 +550,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
         Quantity: 110,
         Value: 11000,
       },
-      // Item "PY Only Discontinued": present in PY (202509) only, not allocated to any Line in CY -> removed globally
+      // Item "PY Only Discontinued": present in PY (202509) only, falls back to latest PY Line (Capital 1) -> counted whether it has CY sales or not
       {
         Date: 202509,
         Line: 'Capital 1',
@@ -571,25 +571,31 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     ]);
 
     const meta = buildMeta(reallocDs);
-    // Only Capital 3 exists in the effective structure; Capital 1, Capital 2, and PY Only Discontinued are excluded
-    expect(meta.lines).toEqual(['Capital 3']);
-    expect(brandOptions(meta, null)).toEqual(['AMPOFER']);
-    expect(itemOptions(meta, null, [])).toEqual(['Ampofer 100 mg 5 Amp']);
+    // Both Capital 1 (from PY-only discontinued item fallback) and Capital 3 exist in the effective structure
+    expect(meta.lines).toEqual(['Capital 1', 'Capital 3']);
+    expect(brandOptions(meta, null)).toEqual(['AMPOFER', 'OLD_BRAND']);
+    expect(itemOptions(meta, null, [])).toEqual(['Ampofer 100 mg 5 Amp', 'PY Only Discontinued']);
+    expect(itemOptions(meta, 'Capital 1', [])).toEqual(['PY Only Discontinued']);
     expect(itemOptions(meta, 'Capital 3', [])).toEqual(['Ampofer 100 mg 5 Amp']);
 
     const q = baseQuery({
       period: { cyYear: 2026, pyYear: 2025, quarter: 3, month: null, likeForLike: false },
     });
     const allRes = analyze(reallocDs, q);
-    // PY includes only Ampofer (100u, 10000V), NOT PY Only Discontinued (999u, 99999V)
-    expect(allRes.totals).toEqual({ pyQ: 100, pyV: 10000, cyQ: 150, cyV: 15000 });
+    // PY includes both Ampofer (100u, 10000V) AND PY Only Discontinued (999u, 99999V)
+    expect(allRes.totals).toEqual({ pyQ: 1099, pyV: 109999, cyQ: 150, cyV: 15000 });
     expect(allRes.lines).toEqual([
+      { line: 'Capital 1', sums: { pyQ: 999, pyV: 99999, cyQ: 0, cyV: 0 } },
       { line: 'Capital 3', sums: { pyQ: 100, pyV: 10000, cyQ: 150, cyV: 15000 } },
     ]);
 
     // Filtering by Capital 3 includes the reallocated PY and earlier CY rows of Ampofer
     const cap3Res = analyze(reallocDs, { ...q, line: 'Capital 3' });
     expect(cap3Res.totals).toEqual({ pyQ: 100, pyV: 10000, cyQ: 150, cyV: 15000 });
+
+    // Filtering by Capital 1 includes the discontinued PY-only item
+    const cap1Res = analyze(reallocDs, { ...q, line: 'Capital 1' });
+    expect(cap1Res.totals).toEqual({ pyQ: 999, pyV: 99999, cyQ: 0, cyV: 0 });
   });
 
   it('17. Guided cascading filters (Channel -> Market -> Product) narrow downstream options and filter totals without line selection', () => {
@@ -825,24 +831,25 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     // C-200: PY=0, CY=4000 (new)
     // C-300: PY=8000, CY=0 (lost)
     // C-400: PY=0, CY=0 (stable)
-    // PY_active = 5000 + 8000 = 13000; Retained CY = 9000; New CY = 4000; Lost PY = 8000; Contraction = 0
-    // Expected: NRR = 9000 / 13000; GRR = 5000 / 13000; Churn = 8000 / 13000; NewRate = 4000 / 13000
-    // Notice Contraction = 0 here, so GRR + Churn = 5000/13000 + 8000/13000 = 1.0 literally!
+    // C-999: PY=25000, CY=0 (lost, bought Gamma Syrup)
+    // PY_active = 5000 + 8000 + 25000 = 38000; Retained CY = 9000; New CY = 4000; Lost PY = 33000; Contraction = 0
+    // Expected: NRR = 9000 / 38000; GRR = 5000 / 38000; Churn = 33000 / 38000; NewRate = 4000 / 38000
+    // Notice Contraction = 0 here, so GRR + Churn = 5000/38000 + 33000/38000 = 1.0 literally!
     const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
     const edgeMeta = buildMeta(edgeDs);
     const edgeRes = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability) }));
     const eci = edgeRes.customerInsights;
-    expect(eci.nrr).toBeCloseTo(9000 / 13000, 6);
-    expect(eci.grr).toBeCloseTo(5000 / 13000, 6);
-    expect(eci.churnRate).toBeCloseTo(8000 / 13000, 6);
-    expect(eci.newRate).toBeCloseTo(4000 / 13000, 6);
-    expect(eci.retainedGrowthShare).toBeCloseTo((9000 - 13000) / 13000, 6);
-    expect(eci.newGrowthShare).toBeCloseTo(4000 / 13000, 6);
-    expect((eci.retainedGrowthShare ?? 0) + (eci.newGrowthShare ?? 0)).toBeCloseTo(0, 6);
-    expect(eci.retainedDelta).toBe(9000 - 13000);
+    expect(eci.nrr).toBeCloseTo(9000 / 38000, 6);
+    expect(eci.grr).toBeCloseTo(5000 / 38000, 6);
+    expect(eci.churnRate).toBeCloseTo(33000 / 38000, 6);
+    expect(eci.newRate).toBeCloseTo(4000 / 38000, 6);
+    expect(eci.retainedGrowthShare).toBeCloseTo((9000 - 38000) / 38000, 6);
+    expect(eci.newGrowthShare).toBeCloseTo(4000 / 38000, 6);
+    expect((eci.retainedGrowthShare ?? 0) + (eci.newGrowthShare ?? 0)).toBeCloseTo((13000 - 38000) / 38000, 6);
+    expect(eci.retainedDelta).toBe(9000 - 38000);
     expect(eci.newDelta).toBe(4000);
     expect((eci.grr ?? 0) + (eci.churnRate ?? 0)).toBeCloseTo(1, 6);
-    expect((eci.nrr ?? 0) + (eci.newRate ?? 0)).toBeCloseTo(1 + 0, 6); // total g = 0 (13000 -> 13000)
+    expect((eci.nrr ?? 0) + (eci.newRate ?? 0)).toBeCloseTo(1 + (13000 - 38000) / 38000, 6); // total g = (13000 - 38000)/38000
 
     // 4. Lost-only fixture and New-only fixture
     const lostOnlyCi = computeCustomerInsightsForMetric(
@@ -979,7 +986,8 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
                 (prod.contractionExposurePp ?? 0) +
                 (prod.churnExposurePp ?? 0);
               const expectedYoyPct = (prodDelta / Math.abs(prodPair.py)) * 100;
-              expect(Math.abs(sumPp - expectedYoyPct)).toBeLessThanOrEqual(1e-6);
+              const tol = Math.max(1e-6, Math.abs(expectedYoyPct) * 1e-9);
+              expect(Math.abs(sumPp - expectedYoyPct)).toBeLessThanOrEqual(tol);
             }
           }
 

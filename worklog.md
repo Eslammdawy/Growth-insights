@@ -161,6 +161,12 @@
 | `src/components/LevelTable.tsx` | Virtualized 5-level table (`SubType`, `Distributor`, `Chains`, `Territory`, `Customer`) with `Contrib. %` diverging bars, `.xlsx` export, optional `Returns %` column & flags, and 5-segment customer filter | Updated & Verified |
 | `src/pages/Dashboard.tsx` | Main page layout assembling header, product filters, KPIs, `#section-drivers`, primary charts, `#section-insights`, `#section-customer-dynamics` (`CustomerDynamics` + `ProductCustomerExposure`), and 5 stacked level tables | Updated & Verified |
 
+### 1.12 Inclusive Product Allocation (Counting All Products Regardless of CY Activity) (2026-11-12)
+- **Universal Product Inclusion (`src/lib/aggregate.ts`)**:
+  - Updated `computeItemAllocations` in `prepare(ds)`: Products with sales in PY that do not have invoices in CY are no longer excluded (`tx[i] = 0`). Instead, they fall back to their latest period in PY to attribute their effective `Line` and `Brand`.
+  - Products with PY sales and zero CY sales are now fully counted across all views, tables, charts, customer dynamics, defector watchlists, PVM waterfalls, and Excel exports, categorized with status `'lost'` (YoY % = `-100.0%`, Δ = `−PY`).
+  - Updated test suite (`src/lib/acceptance.test.ts`) to verify that discontinued / PY-only products are included, attributed to their latest PY line, and reflected across all summary totals. All 43 test assertions pass.
+
 ---
 
 ## 3. Verification Results & Bundle Size Deltas
