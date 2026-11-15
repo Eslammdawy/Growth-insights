@@ -97,6 +97,7 @@ export const MonthChart: React.FC = () => {
     );
   }
 
+  const isMultiQuarter = data.length > 4;
   const isDark = theme === 'dark';
   const gridColor = isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.25)';
   const axisColor = isDark ? '#94a3b8' : '#64748b';
@@ -130,11 +131,13 @@ export const MonthChart: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <div className="hidden flex-wrap gap-1 text-[11px] tabular-nums sm:flex">
+          <div className="hidden flex-wrap gap-1 tabular-nums sm:flex">
             {data.map((d) => (
               <span
                 key={d.month}
-                className="rounded-lg border border-indigo-200/70 bg-indigo-50/70 px-2 py-0.5 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+                className={`rounded-lg border border-indigo-200/70 bg-indigo-50/70 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 ${
+                  isMultiQuarter ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-[11px]'
+                }`}
               >
                 {d.month}: <strong className="text-indigo-600 dark:text-cyan-400">{d.growthText}</strong>
               </span>
@@ -312,26 +315,30 @@ export const MonthChart: React.FC = () => {
                 }
               />
               <Bar yAxisId="left" dataKey="PY" fill="url(#monthPyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34}>
-                <LabelList
-                  dataKey="PY"
-                  position="top"
-                  offset={6}
-                  formatter={(val: number) => (val > 0 ? fmtCompact(val) : '')}
-                  fontSize={10}
-                  fontWeight={700}
-                  fill={isDark ? '#c4b5fd' : '#6d28d9'}
-                />
+                {!isMultiQuarter && (
+                  <LabelList
+                    dataKey="PY"
+                    position="top"
+                    offset={6}
+                    formatter={(val: number) => (val > 0 ? fmtCompact(val) : '')}
+                    fontSize={10}
+                    fontWeight={700}
+                    fill={isDark ? '#c4b5fd' : '#6d28d9'}
+                  />
+                )}
               </Bar>
               <Bar yAxisId="left" dataKey="CY" fill="url(#monthCyGrad)" radius={[6, 6, 0, 0]} maxBarSize={34}>
-                <LabelList
-                  dataKey="CY"
-                  position="top"
-                  offset={6}
-                  formatter={(val: number) => (val > 0 ? fmtCompact(val) : '')}
-                  fontSize={10}
-                  fontWeight={700}
-                  fill={isDark ? '#67e8f9' : '#0284c7'}
-                />
+                {!isMultiQuarter && (
+                  <LabelList
+                    dataKey="CY"
+                    position="top"
+                    offset={6}
+                    formatter={(val: number) => (val > 0 ? fmtCompact(val) : '')}
+                    fontSize={10}
+                    fontWeight={700}
+                    fill={isDark ? '#67e8f9' : '#0284c7'}
+                  />
+                )}
               </Bar>
               <Line
                 yAxisId="right"

@@ -164,10 +164,18 @@ export const TopBar: React.FC = () => {
             </label>
             <select
               id="quarter-select"
-              value={period.quarter}
-              onChange={(e) => updatePeriod({ quarter: Number(e.target.value), month: null })}
+              value={period.quarter ?? ''}
+              onChange={(e) =>
+                updatePeriod({
+                  quarter: e.target.value === '' ? null : Number(e.target.value),
+                  month: null,
+                })
+              }
               className="bg-transparent font-bold text-slate-900 dark:text-slate-100 focus:outline-none"
             >
+              <option value="" className="bg-white dark:bg-slate-900">
+                All Qs
+              </option>
               {[1, 2, 3, 4].map((q) => (
                 <option key={q} value={q} className="bg-white dark:bg-slate-900">
                   Q{q}
@@ -185,10 +193,10 @@ export const TopBar: React.FC = () => {
                 updatePeriod({ month: e.target.value === '' ? null : Number(e.target.value) })
               }
               className="bg-transparent font-medium text-slate-600 dark:text-slate-300 focus:outline-none"
-              title="All months in quarter or single month"
+              title="All months in selection or single month"
             >
               <option value="" className="bg-white dark:bg-slate-900">
-                All Q{period.quarter} months
+                {period.quarter === null ? 'All months' : `All Q${period.quarter} months`}
               </option>
               {qMonths.map((m) => (
                 <option key={m} value={m} className="bg-white dark:bg-slate-900">

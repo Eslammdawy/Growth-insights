@@ -3,11 +3,12 @@
  */
 
 export const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export const yearOf = (yyyymm: number) => Math.floor(yyyymm / 100);
 export const monthOf = (yyyymm: number) => yyyymm % 100;
 export const quarterOfMonth = (month: number) => Math.ceil(month / 3);
-export const quarterMonths = (q: number) => [3 * q - 2, 3 * q - 1, 3 * q];
+export const quarterMonths = (q: number | null): number[] => (q === null ? ALL_MONTHS : [3 * q - 2, 3 * q - 1, 3 * q]);
 export const yy = (year: number) => String(year % 100).padStart(2, '0');
 
 /** Months (1..12) available per year. */
@@ -34,17 +35,15 @@ export function availabilityFromPeriods(periods: Iterable<number>): PeriodAvaila
 export interface PeriodSelection {
   cyYear: number;
   pyYear: number;
-  quarter: number; // 1..4
-  month: number | null; // optional single month within the quarter
+  quarter: number | null; // null = All Qs (1..12), 1..4 = Q1..Q4
+  month: number | null; // optional single month within the quarter (or full year)
   likeForLike: boolean;
 }
 
-/** Default selection: latest year = CY, prior year = PY, latest quarter that has CY data. */
+/** Default selection: latest year = CY, prior year = PY, All Qs / All months with like-for-like ON. */
 export function defaultSelection(av: PeriodAvailability): PeriodSelection {
   const cyYear = av.years[av.years.length - 1] ?? new Date().getFullYear();
-  const months = av.monthsByYear[cyYear] ?? [];
-  const lastMonth = months[months.length - 1] ?? 1;
-  return { cyYear, pyYear: cyYear - 1, quarter: quarterOfMonth(lastMonth), month: null, likeForLike: true };
+  return { cyYear, pyYear: cyYear - 1, quarter: null, month: null, likeForLike: true };
 }
 
 export interface ResolvedPeriod {
@@ -73,30 +72,31 @@ export function resolvePeriod(av: PeriodAvailability, sel: PeriodSelection): Res
   const complete = cyMonths.length === wanted.length;
   const pyMonths = sel.likeForLike ? cyMonths : wanted;
   const toP = (y: number, ms: number[]) => ms.map((m) => y * 100 + m);
-  const qLabel = (y: number) => `Q${sel.quarter}-${yy(y)}`;
+  const scopeLabel = (y: number) => (sel.quarter === null ? `FY-${yy(y)}` : `Q${sel.quarter}-${yy(y)}`);
+  const fullScopeText = sel.quarter === null ? 'full year' : 'full quarter';
 
   let banner: string;
   let cyLabel: string;
   let pyLabel: string;
   if (!cyMonths.length) {
-    cyLabel = sel.month ? monthsLabel(wanted, sel.cyYear) : qLabel(sel.cyYear);
-    pyLabel = sel.month ? monthsLabel(wanted, sel.pyYear) : qLabel(sel.pyYear);
+    cyLabel = sel.month ? monthsLabel(wanted, sel.cyYear) : scopeLabel(sel.cyYear);
+    pyLabel = sel.month ? monthsLabel(wanted, sel.pyYear) : scopeLabel(sel.pyYear);
     banner = `No ${sel.cyYear} data for ${cyLabel}` + (sel.likeForLike ? ' – like-for-like comparison is empty' : ` – comparing against ${pyLabel}`);
   } else if (sel.month) {
     cyLabel = monthsLabel(wanted, sel.cyYear);
     pyLabel = monthsLabel(wanted, sel.pyYear);
     banner = `Comparing ${cyLabel} vs ${pyLabel}`;
   } else if (complete) {
-    cyLabel = qLabel(sel.cyYear);
-    pyLabel = qLabel(sel.pyYear);
+    cyLabel = scopeLabel(sel.cyYear);
+    pyLabel = scopeLabel(sel.pyYear);
     banner = `Comparing ${cyLabel} vs ${pyLabel} (all ${wanted.length} months)`;
   } else if (sel.likeForLike) {
     cyLabel = monthsLabel(cyMonths, sel.cyYear);
     pyLabel = monthsLabel(cyMonths, sel.pyYear);
     banner = `Comparing ${cyLabel} vs ${pyLabel} (like-for-like)`;
   } else {
-    cyLabel = `${qLabel(sel.cyYear)} (${monthsLabel(cyMonths, sel.cyYear)} only)`;
-    pyLabel = `${qLabel(sel.pyYear)} (full quarter)`;
+    cyLabel = `${scopeLabel(sel.cyYear)} (${monthsLabel(cyMonths, sel.cyYear)} only)`;
+    pyLabel = `${scopeLabel(sel.pyYear)} (${fullScopeText})`;
     banner = `Comparing ${cyLabel} vs ${pyLabel} – like-for-like is off`;
   }
   const chartMonths = [...new Set([...cyMonths, ...pyMonths])].sort((a, b) => a - b);

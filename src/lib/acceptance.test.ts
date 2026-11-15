@@ -43,7 +43,7 @@ import {
 } from './metrics';
 import { fmtGrowth, fmtPrice, fmtSignedPrice } from './format';
 import { DRIVER_LEVELS, buildHeadline, buildWaterfall, growthConcentration } from './insights';
-import { defaultSelection } from './periods';
+import { defaultSelection, resolvePeriod } from './periods';
 import { parseHashParams, serializeHashState, validateHashAgainstMeta } from './hashState';
 
 const sampleDs = datasetFromRows(sampleRows as Record<string, unknown>[]);
@@ -148,6 +148,8 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     const edgeMeta = buildMeta(edgeDs);
     const sel = defaultSelection(edgeMeta.availability);
     expect(sel.likeForLike).toBe(true);
+    expect(sel.quarter).toBeNull();
+    expect(sel.month).toBeNull();
 
     const lflOn = analyze(edgeDs, {
       ...baseQuery({ period: { ...sel, likeForLike: true } }),
@@ -162,12 +164,23 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(lflOn.totals.cyQ).toBeCloseTo(200, 6);
     expect(lflOn.totals.cyV).toBeCloseTo(13000, 6);
 
-    // When like-for-like is OFF, PY includes full Q3 (202507, 202508, 202509)
-    const lflOff = analyze(edgeDs, {
-      ...baseQuery({ period: { ...sel, likeForLike: false } }),
+    // When like-for-like is OFF in Q3, PY includes full Q3 (202507, 202508, 202509)
+    const lflOffQ3 = analyze(edgeDs, {
+      ...baseQuery({ period: { ...sel, quarter: 3, likeForLike: false } }),
     });
-    expect(lflOff.period.pyPeriods).toEqual([202507, 202508, 202509]);
-    expect(lflOff.totals.pyQ).toBeCloseTo(680 + 200 + 300, 6);
+    expect(lflOffQ3.period.pyPeriods).toEqual([202507, 202508, 202509]);
+    expect(lflOffQ3.period.banner).toContain('Q3-25 (full quarter)');
+    expect(lflOffQ3.totals.pyQ).toBeCloseTo(680 + 200 + 300, 6);
+
+    // When like-for-like is OFF in All Qs, PY includes full year (202501..202512)
+    const lflOffAll = analyze(edgeDs, {
+      ...baseQuery({ period: { ...sel, quarter: null, likeForLike: false } }),
+    });
+    expect(lflOffAll.period.pyPeriods).toEqual([
+      202501, 202502, 202503, 202504, 202505, 202506, 202507, 202508, 202509, 202510, 202511, 202512,
+    ]);
+    expect(lflOffAll.period.banner).toContain('FY-25 (full year)');
+    expect(lflOffAll.totals.pyQ).toBeCloseTo(680 + 200 + 300, 6);
   });
 
   it('5. Growth edge cases: PY=0 -> "New", CY=0 with PY>0 -> -100.0% ("lost"), both 0 -> "–"', () => {
@@ -360,6 +373,20 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(safeValidated.period.month).toBeNull();
     expect(safeValidated.txTypes).toEqual(['Sales', 'Return Sales']);
     expect(safeValidated.drill).toEqual([]);
+
+    // All Qs (quarter: null) round-trips as q=all and validates across all 12 months
+    const allQsHash = serializeHashState({
+      ...original,
+      period: { cyYear: 2026, pyYear: 2025, quarter: null, month: 2, likeForLike: true },
+    });
+    expect(allQsHash).toContain('q=all');
+    expect(allQsHash).toContain('m=2');
+    const parsedAllQs = parseHashParams(allQsHash);
+    expect(parsedAllQs.quarter).toBeNull();
+    expect(parsedAllQs.month).toBe(2);
+    const validatedAllQs = validateHashAgainstMeta(parsedAllQs, sampleMeta, defPeriod);
+    expect(validatedAllQs.period.quarter).toBeNull();
+    expect(validatedAllQs.period.month).toBe(2);
   });
 
   it('13. Territory × Month matrix (Visual 2) reconciles horizontally to Territory totals and vertically to Month buckets', () => {
@@ -1072,5 +1099,118 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(direct.contractionEffect).toBe(-1000);
     expect(direct.lostCustomerEffect).toBe(-1500);
     expect(direct.totalDelta).toBe(0);
+  });
+
+  it('26. All Qs + All months and All Qs + single month period resolution, FY labels, and 12-month trend buckets', () => {
+    const all12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const fullAv = { years: [2025, 2026], monthsByYear: { 2025: all12, 2026: all12 } };
+
+    // 1. Default selection uses All Qs + All months with like-for-like ON
+    const defSel = defaultSelection(fullAv);
+    expect(defSel).toEqual({
+      cyYear: 2026,
+      pyYear: 2025,
+      quarter: null,
+      month: null,
+      likeForLike: true,
+    });
+
+    // 2. Full 12-month year resolves to FY-26 vs FY-25
+    const fullRes = resolvePeriod(fullAv, defSel);
+    expect(fullRes.cyPeriods).toEqual(all12.map((m) => 202600 + m));
+    expect(fullRes.pyPeriods).toEqual(all12.map((m) => 202500 + m));
+    expect(fullRes.chartMonths).toEqual(all12);
+    expect(fullRes.complete).toBe(true);
+    expect(fullRes.cyLabel).toBe('FY-26');
+    expect(fullRes.pyLabel).toBe('FY-25');
+    expect(fullRes.banner).toBe('Comparing FY-26 vs FY-25 (all 12 months)');
+
+    // 3. Partial-year (Jan–Sep) with LFL ON vs OFF
+    const partialAv = { years: [2025, 2026], monthsByYear: { 2025: all12, 2026: [1, 2, 3, 4, 5, 6, 7, 8, 9] } };
+    const partialLflOn = resolvePeriod(partialAv, { ...defSel, likeForLike: true });
+    expect(partialLflOn.complete).toBe(false);
+    expect(partialLflOn.cyLabel).toBe('Jan–Sep-26');
+    expect(partialLflOn.pyLabel).toBe('Jan–Sep-25');
+    expect(partialLflOn.banner).toBe('Comparing Jan–Sep-26 vs Jan–Sep-25 (like-for-like)');
+    expect(partialLflOn.chartMonths).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+    const partialLflOff = resolvePeriod(partialAv, { ...defSel, likeForLike: false });
+    expect(partialLflOff.cyLabel).toBe('FY-26 (Jan–Sep-26 only)');
+    expect(partialLflOff.pyLabel).toBe('FY-25 (full year)');
+    expect(partialLflOff.banner).toBe('Comparing FY-26 (Jan–Sep-26 only) vs FY-25 (full year) – like-for-like is off');
+    expect(partialLflOff.chartMonths).toEqual(all12);
+
+    // 4. All Qs + single month (e.g., Aug) resolves to Aug-26 vs Aug-25
+    const singleMonthRes = resolvePeriod(fullAv, { ...defSel, month: 8 });
+    expect(singleMonthRes.cyPeriods).toEqual([202608]);
+    expect(singleMonthRes.pyPeriods).toEqual([202508]);
+    expect(singleMonthRes.chartMonths).toEqual([8]);
+    expect(singleMonthRes.cyLabel).toBe('Aug-26');
+    expect(singleMonthRes.pyLabel).toBe('Aug-25');
+    expect(singleMonthRes.banner).toBe('Comparing Aug-26 vs Aug-25');
+
+    // 5. Full-year dataset analysis returns 12 monthly buckets reconciling to grand totals
+    const yearRows = all12.flatMap((m) => [
+      {
+        Date: 202500 + m,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-1',
+        CustomerName: 'Pharm 1',
+        Distributor: 'Ibn Sina',
+        TransactionType: 'Sales',
+        Quantity: 10,
+        Value: 1000,
+      },
+      {
+        Date: 202600 + m,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-1',
+        CustomerName: 'Pharm 1',
+        Distributor: 'Ibn Sina',
+        TransactionType: 'Sales',
+        Quantity: 15,
+        Value: 1500,
+      },
+    ]);
+    const yearDs = datasetFromRows(yearRows);
+    const yearMeta = buildMeta(yearDs);
+    const yearAnalysis = analyze(yearDs, baseQuery({ period: defaultSelection(yearMeta.availability) }));
+    expect(yearAnalysis.period.cyLabel).toBe('FY-26');
+    expect(yearAnalysis.period.pyLabel).toBe('FY-25');
+    expect(yearAnalysis.months).toHaveLength(12);
+    expect(yearAnalysis.totals).toEqual({ pyQ: 120, pyV: 12000, cyQ: 180, cyV: 18000 });
+    const summedMonths = yearAnalysis.months.reduce(
+      (acc, mp) => ({
+        pyQ: acc.pyQ + mp.sums.pyQ,
+        pyV: acc.pyV + mp.sums.pyV,
+        cyQ: acc.cyQ + mp.sums.cyQ,
+        cyV: acc.cyV + mp.sums.cyV,
+      }),
+      { pyQ: 0, pyV: 0, cyQ: 0, cyV: 0 },
+    );
+    expect(summedMonths).toEqual(yearAnalysis.totals);
+
+    // Selecting a single month under All Qs filters to 1 month bucket
+    const augAnalysis = analyze(
+      yearDs,
+      baseQuery({ period: { ...defaultSelection(yearMeta.availability), month: 8 } }),
+    );
+    expect(augAnalysis.months).toHaveLength(1);
+    expect(augAnalysis.months[0].month).toBe(8);
+    expect(augAnalysis.totals).toEqual({ pyQ: 10, pyV: 1000, cyQ: 15, cyV: 1500 });
   });
 });

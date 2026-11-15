@@ -170,7 +170,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   result: null,
   itemsByRow: {},
 
-  period: { cyYear: 2026, pyYear: 2025, quarter: 3, month: null, likeForLike: true },
+  period: { cyYear: 2026, pyYear: 2025, quarter: null, month: null, likeForLike: true },
   metric: initialHash.metric ?? 'value',
   line: initialHash.line ?? null,
   txTypes: [...TX_TYPES],

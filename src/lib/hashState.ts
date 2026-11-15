@@ -11,7 +11,7 @@ export interface ParsedHashState {
   metric?: Metric;
   line?: string | null;
   cyYear?: number;
-  quarter?: number;
+  quarter?: number | null;
   month?: number | null;
   likeForLike?: boolean;
   brands?: string[];
@@ -53,8 +53,13 @@ export function parseHashParams(hashString: string): ParsedHashState {
   }
 
   if (params.has('q')) {
-    const q = parseInt(params.get('q')!, 10);
-    if (q >= 1 && q <= 4) out.quarter = q;
+    const qRaw = params.get('q')!;
+    if (qRaw === 'all' || qRaw === '') {
+      out.quarter = null;
+    } else {
+      const q = parseInt(qRaw, 10);
+      if (q >= 1 && q <= 4) out.quarter = q;
+    }
   }
 
   if (params.has('m')) {
@@ -180,9 +185,11 @@ export function validateHashAgainstMeta(
       : currentPeriod.cyYear;
 
   const quarter =
-    parsed.quarter && parsed.quarter >= 1 && parsed.quarter <= 4
-      ? parsed.quarter
-      : currentPeriod.quarter;
+    parsed.quarter === null
+      ? null
+      : parsed.quarter && parsed.quarter >= 1 && parsed.quarter <= 4
+        ? parsed.quarter
+        : currentPeriod.quarter;
 
   const validMonths = quarterMonths(quarter);
   const month =
@@ -278,7 +285,7 @@ export function serializeHashState(state: {
   if (state.metric) params.set('metric', state.metric);
   if (state.line) params.set('line', state.line);
   params.set('year', String(state.period.cyYear));
-  params.set('q', String(state.period.quarter));
+  params.set('q', state.period.quarter === null ? 'all' : String(state.period.quarter));
   if (state.period.month !== null) {
     params.set('m', String(state.period.month));
   }
