@@ -40,6 +40,12 @@ function ChartSkeleton() {
   );
 }
 
+function DriversSkeleton() {
+  return (
+    <div className="glass-panel h-12 w-full animate-pulse rounded-2xl border border-slate-200/70 dark:border-slate-800/80" />
+  );
+}
+
 export const Dashboard: React.FC = () => {
   const {
     meta,
@@ -156,13 +162,6 @@ export const Dashboard: React.FC = () => {
               <DrillChips />
               <KpiCards />
 
-              {/* Growth Drivers Story Section (WI-1 & WI-3) */}
-              <ErrorBoundary title="Growth Drivers">
-                <Suspense fallback={<ChartSkeleton />}>
-                  <GrowthDrivers />
-                </Suspense>
-              </ErrorBoundary>
-
               {/* Primary Charts Row: Composed Monthly Trend + Top N YoY Growth Chart */}
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <ErrorBoundary title="Monthly Trend Chart">
@@ -179,6 +178,13 @@ export const Dashboard: React.FC = () => {
 
               {/* In-page jump bar */}
               <TableJumpBar />
+
+              {/* Growth Drivers Story Section (WI-1 & WI-3) */}
+              <ErrorBoundary title="Growth Drivers">
+                <Suspense fallback={<DriversSkeleton />}>
+                  <GrowthDrivers />
+                </Suspense>
+              </ErrorBoundary>
 
               {/* Stacked Level Tables: SubType, Distributor, Chains, Territory, Customer (+ CustomerDynamics above Customer) */}
               <div

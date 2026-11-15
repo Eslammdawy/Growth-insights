@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useTransition } from 'react';
+import React, { useEffect, useMemo, useState, useTransition } from 'react';
 import {
   AlertTriangle,
   BarChart3,
@@ -41,8 +41,14 @@ import { useDashboardStore } from '../store/useDashboardStore';
 
 export const GrowthDrivers: React.FC = () => {
   const [, startTransition] = useTransition();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [showTable, setShowTable] = useState(false);
+
+  useEffect(() => {
+    const onExpand = () => setOpen(true);
+    window.addEventListener('expand-drivers', onExpand);
+    return () => window.removeEventListener('expand-drivers', onExpand);
+  }, []);
 
   const {
     result,
@@ -201,7 +207,10 @@ export const GrowthDrivers: React.FC = () => {
               <button
                 key={lvl}
                 type="button"
-                onClick={() => setDriverLevel(lvl)}
+                onClick={() => {
+                  setDriverLevel(lvl);
+                  setOpen(true);
+                }}
                 aria-pressed={driverLevel === lvl}
                 className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
                   driverLevel === lvl

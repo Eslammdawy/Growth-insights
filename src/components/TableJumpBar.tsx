@@ -32,6 +32,13 @@ export const TableJumpBar: React.FC = () => {
     });
   };
 
+  const jumpToDrivers = () => {
+    window.dispatchEvent(new CustomEvent('expand-drivers'));
+    requestAnimationFrame(() => {
+      scrollToElement('section-drivers');
+    });
+  };
+
   return (
     <nav
       aria-label="Table jump navigation"
@@ -54,7 +61,7 @@ export const TableJumpBar: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={() => scrollToElement('section-drivers')}
+            onClick={jumpToDrivers}
             className="inline-flex items-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-1 font-bold text-emerald-800 shadow-sm transition-all hover:bg-emerald-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-emerald-200 dark:hover:bg-emerald-600"
           >
             <Compass className="h-3 w-3" />

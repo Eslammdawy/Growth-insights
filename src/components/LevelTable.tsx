@@ -31,7 +31,6 @@ import {
   returnsRatePct,
 } from '../lib/metrics';
 import { StatusFilter, useDashboardStore } from '../store/useDashboardStore';
-import { TerritoryBrandMix } from './TerritoryBrandMix';
 
 type SortId = 'label' | 'py' | 'cy' | 'delta' | 'growth' | 'contrib' | 'returns';
 
@@ -1002,11 +1001,6 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
               </tr>
             </tfoot>
           </table>
-        </div>
-      )}
-      {!collapsed && level === 'territory' && (
-        <div className="px-3 pb-3">
-          <TerritoryBrandMix />
         </div>
       )}
     </section>
