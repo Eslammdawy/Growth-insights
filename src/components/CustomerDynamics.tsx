@@ -47,10 +47,16 @@ const SEGMENT_BADGE: Record<CustomerSegment, string> = {
 
 export const CustomerDynamics: React.FC = () => {
   const [, startTransition] = useTransition();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [selectedSubType, setSelectedSubType] = useState<string>('all');
   const [expandedDefectors, setExpandedDefectors] = useState<Set<string>>(() => new Set());
   const targets = useRef(new Map<string, ItemTarget>());
+
+  useEffect(() => {
+    const onExpand = () => setOpen(true);
+    window.addEventListener('expand-customer-dynamics', onExpand);
+    return () => window.removeEventListener('expand-customer-dynamics', onExpand);
+  }, []);
 
   const {
     result,

@@ -54,8 +54,6 @@ import { KpiInfoTooltip } from './KpiInfoTooltip';
 
 type SortColumn =
   | 'label'
-  | 'py'
-  | 'cy'
   | 'delta'
   | 'absDelta'
   | 'growth'
@@ -93,12 +91,18 @@ function segmentBarFill(seg: CustomerSegment, isDark: boolean): string {
 
 export const ProductCustomerExposure: React.FC = () => {
   const [, startTransition] = useTransition();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [showTableMode, setShowTableMode] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [sortBy, setSortBy] = useState<SortColumn>('absDelta');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  useEffect(() => {
+    const onExpand = () => setOpen(true);
+    window.addEventListener('expand-customer-dynamics', onExpand);
+    return () => window.removeEventListener('expand-customer-dynamics', onExpand);
+  }, []);
 
   const {
     result,
@@ -198,10 +202,6 @@ export const ProductCustomerExposure: React.FC = () => {
     const valOf = (r: ProductSegmentBreakdown): number => {
       const d = deriveRow(r.totals, metric);
       switch (sortBy) {
-        case 'py':
-          return d.py;
-        case 'cy':
-          return d.cy;
         case 'delta':
           return d.delta;
         case 'absDelta':
@@ -358,7 +358,7 @@ export const ProductCustomerExposure: React.FC = () => {
     );
   };
 
-  const totalColSpan = showTableMode ? 10 : 11;
+  const totalColSpan = showTableMode ? 8 : 9;
 
   return (
     <div
@@ -603,52 +603,6 @@ export const ProductCustomerExposure: React.FC = () => {
                             meaning={`Click any row or chevron to expand its 5-step Customer-Behavior Decomposition waterfall. Click the filter icon to filter the dashboard by that ${levelLabel.toLowerCase()} and jump to the Customer table.`}
                             formula="Item → Brand → Line hierarchy uses each item's latest CY period allocation."
                             alignClass="left-0"
-                          />
-                        </div>
-                      </th>
-
-                      <th
-                        aria-sort={ariaSortFor('py')}
-                        className="relative border-b border-indigo-100/80 px-2.5 py-2.5 text-right dark:border-slate-800"
-                      >
-                        <div className="inline-flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => toggleSort('py')}
-                            className="inline-flex items-center gap-1 font-extrabold uppercase tracking-wider hover:text-fuchsia-700 dark:hover:text-fuchsia-300"
-                          >
-                            <span>PY ({result.period.pyLabel})</span>
-                            {renderSortIcon('py')}
-                          </button>
-                          <KpiInfoTooltip
-                            id="exp-tip-py"
-                            title="Prior Year (PY)"
-                            meaning={`Total ${METRIC_LABEL[metric].toLowerCase()} for this ${levelLabel.toLowerCase()} in the prior period (${result.period.pyLabel}).`}
-                            formula="PY = Σ Segment PY across all 5 customer lifecycle segments"
-                            alignClass="right-0"
-                          />
-                        </div>
-                      </th>
-
-                      <th
-                        aria-sort={ariaSortFor('cy')}
-                        className="relative border-b border-indigo-100/80 px-2.5 py-2.5 text-right dark:border-slate-800"
-                      >
-                        <div className="inline-flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => toggleSort('cy')}
-                            className="inline-flex items-center gap-1 font-extrabold uppercase tracking-wider hover:text-fuchsia-700 dark:hover:text-fuchsia-300"
-                          >
-                            <span>CY ({result.period.cyLabel})</span>
-                            {renderSortIcon('cy')}
-                          </button>
-                          <KpiInfoTooltip
-                            id="exp-tip-cy"
-                            title="Current Year (CY)"
-                            meaning={`Total ${METRIC_LABEL[metric].toLowerCase()} for this ${levelLabel.toLowerCase()} in the current period (${result.period.cyLabel}).`}
-                            formula="CY = Σ Segment CY across all 5 customer lifecycle segments"
-                            alignClass="right-0"
                           />
                         </div>
                       </th>
@@ -919,14 +873,6 @@ export const ProductCustomerExposure: React.FC = () => {
                                   <Filter className="h-3.5 w-3.5" />
                                 </button>
                               </div>
-                            </td>
-
-                            <td className="px-2.5 py-2 text-right text-slate-600 dark:text-slate-300">
-                              {fmtMetric(d.py, metric, false)}
-                            </td>
-
-                            <td className="px-2.5 py-2 text-right font-bold text-slate-900 dark:text-white">
-                              {fmtMetric(d.cy, metric, false)}
                             </td>
 
                             <td

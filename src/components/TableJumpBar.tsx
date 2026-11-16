@@ -39,6 +39,13 @@ export const TableJumpBar: React.FC = () => {
     });
   };
 
+  const jumpToCustomerDynamics = () => {
+    window.dispatchEvent(new CustomEvent('expand-customer-dynamics'));
+    requestAnimationFrame(() => {
+      scrollToElement('section-customer-dynamics');
+    });
+  };
+
   return (
     <nav
       aria-label="Table jump navigation"
@@ -72,7 +79,7 @@ export const TableJumpBar: React.FC = () => {
               {lvl === 'customer' && (
                 <button
                   type="button"
-                  onClick={() => scrollToElement('section-customer-dynamics')}
+                  onClick={jumpToCustomerDynamics}
                   className="rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 px-3 py-1 font-bold text-fuchsia-800 shadow-sm transition-all hover:bg-fuchsia-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-fuchsia-200 dark:hover:bg-fuchsia-600"
                 >
                   Customer Dynamics
