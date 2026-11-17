@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand';
 import {
+  AllLevelsItemsResult,
   AnalysisQuery,
   AnalysisResult,
   DatasetMeta,
@@ -117,6 +118,7 @@ export interface DashboardState {
   loadSampleData: () => Promise<void>;
   refreshAnalysis: () => Promise<void>;
   fetchItems: (rowId: string, target: ItemTarget) => Promise<void>;
+  fetchAllLevelsItems: (levels?: Level[]) => Promise<AllLevelsItemsResult | null>;
   setMetric: (metric: Metric) => void;
   setLine: (line: string | null) => void;
   setLines: (lines: string[]) => void;
@@ -281,6 +283,15 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       if (version !== analysisVersion) return;
       set({ itemsByRow: { ...get().itemsByRow, [rowId]: 'error' } });
     }
+  },
+
+  fetchAllLevelsItems: async (levels) => {
+    const st = get();
+    if (!st.meta) return null;
+    const version = analysisVersion;
+    const res = await workerClient.allLevelsItems(currentQuery(st), levels);
+    if (version !== analysisVersion) return null;
+    return res;
   },
 
   setMetric: (metric) => {

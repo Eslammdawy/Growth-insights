@@ -1,6 +1,9 @@
-import React from 'react';
-import { ArrowUp, Compass, Layers } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
+import { ArrowUp, Compass, FileSpreadsheet, Layers, Loader2 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { LEVEL_LABEL, TABLE_LEVELS, Level } from '../lib/aggregate';
+import { exportAllLevelsToExcel } from '../lib/exportExcel';
+import { useDashboardStore } from '../store/useDashboardStore';
 
 const JUMP_PILL_STYLE: Record<Level, string> = {
   subtype:
@@ -18,6 +21,44 @@ const JUMP_PILL_STYLE: Record<Level, string> = {
 };
 
 export const TableJumpBar: React.FC = () => {
+  const { result, metric, txTypes, showReturns, analyzing, fetchAllLevelsItems } = useDashboardStore(
+    useShallow((s) => ({
+      result: s.result,
+      metric: s.metric,
+      txTypes: s.txTypes,
+      showReturns: s.showReturns,
+      analyzing: s.analyzing,
+      fetchAllLevelsItems: s.fetchAllLevelsItems,
+    })),
+  );
+  const [exporting, setExporting] = useState(false);
+
+  const bothTxTypes = txTypes.includes('Sales') && txTypes.includes('Return Sales');
+  const effectiveShowReturns = showReturns && bothTxTypes;
+
+  const handleExportAllLevels = useCallback(async () => {
+    if (!result || exporting || analyzing) return;
+    setExporting(true);
+    try {
+      const itemsByLevel = await fetchAllLevelsItems(TABLE_LEVELS);
+      if (!itemsByLevel) return;
+      exportAllLevelsToExcel({
+        levels: TABLE_LEVELS,
+        levelsData: result.levels,
+        itemsByLevel,
+        period: result.period,
+        metric,
+        portfolioTotals: result.totals,
+        portfolioGrossTotals: result.grossTotals,
+        showReturns: effectiveShowReturns,
+      });
+    } catch (err) {
+      console.error('Failed to export all levels to Excel:', err);
+    } finally {
+      setExporting(false);
+    }
+  }, [result, exporting, analyzing, fetchAllLevelsItems, metric, effectiveShowReturns]);
+
   const scrollToElement = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -96,9 +137,26 @@ export const TableJumpBar: React.FC = () => {
           ))}
         </div>
       </div>
-      <span className="hidden rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 md:inline">
-        5 levels stacked
-      </span>
+      <div className="flex shrink-0 items-center gap-2 pl-2">
+        <span className="hidden rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 md:inline">
+          5 levels stacked
+        </span>
+        <button
+          type="button"
+          onClick={() => void handleExportAllLevels()}
+          disabled={exporting || analyzing || !result}
+          title="Export all 5 levels (each in a separate Excel tab) with per-product breakdown"
+          aria-label="Export all levels to Excel"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-gradient-to-r from-emerald-500/15 to-teal-500/15 px-3 py-1 text-xs font-bold text-emerald-800 shadow-sm transition-all hover:from-emerald-500/25 hover:to-teal-500/25 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:text-emerald-300"
+        >
+          {exporting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
+          ) : (
+            <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+          )}
+          <span>{exporting ? 'Exporting…' : 'Export All Levels'}</span>
+        </button>
+      </div>
     </nav>
   );
 };

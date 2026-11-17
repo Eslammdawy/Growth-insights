@@ -1639,6 +1639,159 @@ export function analyzeItems(ds: Dataset, query: AnalysisQuery, target: ItemTarg
   return out;
 }
 
+export type AllLevelsItemsResult = Record<Level, Record<string, GroupRow[]>>;
+
+/**
+ * Single-pass computation of Item breakdowns for every row across all requested levels.
+ * Mirrors `analyze()` and `analyzeItems()` filtering and exclusion rules.
+ */
+export function analyzeAllLevelsItems(
+  ds: Dataset,
+  query: AnalysisQuery,
+  targetLevels: readonly Level[] = TABLE_LEVELS,
+): AllLevelsItemsResult {
+  const ctx = buildContext(ds, query);
+  const { p, pflag, txAllowed, globalMasks, productMasks } = ctx;
+  const c = p.c;
+  const masks: Masks = [...globalMasks, ...productMasks];
+  const nm = masks.length;
+  const nItem = c.item.dict.length;
+
+  const result = {} as AllLevelsItemsResult;
+  for (const lvl of LEVELS) result[lvl] = {};
+
+  if (targetLevels.length === 0 || nItem === 0) return result;
+
+  const excludedDistributors = new Set(EXCLUDED_DISTRIBUTORS.map((d) => d.trim().toLowerCase()));
+  const INITIAL_CAP = 1024;
+
+  const trackers = targetLevels.map((level) => {
+    const col = c[LEVEL_COL[level]];
+    const skipGroup = new Uint8Array(col.dict.length);
+    if (level === 'distributor') {
+      for (let g = 0; g < col.dict.length; g++) {
+        if (excludedDistributors.has(col.dict[g].trim().toLowerCase())) skipGroup[g] = 1;
+      }
+    } else if (level === 'chain') {
+      for (let g = 0; g < col.dict.length; g++) {
+        const val = col.dict[g];
+        if (!val || val.trim() === '' || val === UNASSIGNED_LABEL || val === UNASSIGNED_CHAIN_LABEL) {
+          skipGroup[g] = 1;
+        }
+      }
+    }
+    return {
+      level,
+      col,
+      codes: col.codes,
+      skipGroup,
+      slots: new Map<number, number>(),
+      len: 0,
+      cap: INITIAL_CAP,
+      groupIdx: new Int32Array(INITIAL_CAP),
+      itemIdx: new Int32Array(INITIAL_CAP),
+      acc: new Float64Array(INITIAL_CAP * 8),
+      cnt: new Int32Array(INITIAL_CAP),
+    };
+  });
+
+  const { qty, val, tx, periodIdx } = p;
+  const itemCodes = c.item.codes;
+  const nt = trackers.length;
+
+  rows: for (let i = 0; i < p.n; i++) {
+    if (!txAllowed[tx[i]]) continue;
+    const f = pflag[periodIdx[i]];
+    if (!f) continue;
+    for (let j = 0; j < nm; j++) if (!masks[j][1][masks[j][0][i]]) continue rows;
+
+    const off = f === 2 ? 2 : 0;
+    const isSales = tx[i] === 1;
+    const it = itemCodes[i];
+    const q = qty[i];
+    const v = val[i];
+
+    for (let t = 0; t < nt; t++) {
+      const tr = trackers[t];
+      const g = tr.codes[i];
+      if (tr.skipGroup[g]) continue;
+      const key = g * nItem + it;
+      let slot = tr.slots.get(key);
+      if (slot === undefined) {
+        slot = tr.len++;
+        if (slot >= tr.cap) {
+          const nextCap = tr.cap * 2;
+          const nextG = new Int32Array(nextCap);
+          nextG.set(tr.groupIdx);
+          tr.groupIdx = nextG;
+          const nextI = new Int32Array(nextCap);
+          nextI.set(tr.itemIdx);
+          tr.itemIdx = nextI;
+          const nextAcc = new Float64Array(nextCap * 8);
+          nextAcc.set(tr.acc);
+          tr.acc = nextAcc;
+          const nextCnt = new Int32Array(nextCap);
+          nextCnt.set(tr.cnt);
+          tr.cnt = nextCnt;
+          tr.cap = nextCap;
+        }
+        tr.slots.set(key, slot);
+        tr.groupIdx[slot] = g;
+        tr.itemIdx[slot] = it;
+      }
+      const base = slot * 8;
+      tr.acc[base + off] += q;
+      tr.acc[base + off + 1] += v;
+      if (isSales) {
+        tr.acc[base + 4 + off] += q;
+        tr.acc[base + 4 + off + 1] += v;
+      }
+      tr.cnt[slot]++;
+    }
+  }
+
+  for (const tr of trackers) {
+    const field = LEVEL_FIELD[tr.level];
+    const outMap = result[tr.level];
+    for (let slot = 0; slot < tr.len; slot++) {
+      const g = tr.groupIdx[slot];
+      const it = tr.itemIdx[slot];
+      const value = tr.col.dict[g];
+      const parentId = `${field}:${value}`;
+      const itemName = c.item.dict[it];
+      const b = p.itemBrand[it];
+      const base = slot * 8;
+      let arr = outMap[parentId];
+      if (!arr) {
+        arr = [];
+        outMap[parentId] = arr;
+      }
+      arr.push({
+        id: `${parentId}|Item:${itemName}`,
+        field: 'Item',
+        value: itemName,
+        label: itemName || UNASSIGNED_LABEL,
+        sums: {
+          pyQ: tr.acc[base],
+          pyV: tr.acc[base + 1],
+          cyQ: tr.acc[base + 2],
+          cyV: tr.acc[base + 3],
+        },
+        gross: {
+          pyQ: tr.acc[base + 4],
+          pyV: tr.acc[base + 5],
+          cyQ: tr.acc[base + 6],
+          cyV: tr.acc[base + 7],
+        },
+        rowCount: tr.cnt[slot],
+        brand: b >= 0 ? c.brand.dict[b] : undefined,
+      });
+    }
+  }
+
+  return result;
+}
+
 /** Sum of a list of group rows (used for validation and totals). */
 export function sumRows(rows: { sums: Sums }[]): Sums {
   const s = emptySums();

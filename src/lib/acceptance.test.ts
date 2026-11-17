@@ -13,7 +13,9 @@ import {
   AnalysisQuery,
   INSIGHT_LEVELS,
   LEVELS,
+  TABLE_LEVELS,
   analyze,
+  analyzeAllLevelsItems,
   analyzeItems,
   buildMeta,
   brandOptions,
@@ -1256,5 +1258,50 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(augAnalysis.months).toHaveLength(1);
     expect(augAnalysis.months[0].month).toBe(8);
     expect(augAnalysis.totals).toEqual({ pyQ: 10, pyV: 1000, cyQ: 15, cyV: 1500 });
+  });
+
+  it('27. analyzeAllLevelsItems returns single-pass per-product breakdowns across all TABLE_LEVELS matching parent row sums and analyzeItems()', () => {
+    const q = baseQuery();
+    const res = analyze(sampleDs, q);
+    const allItems = analyzeAllLevelsItems(sampleDs, q, TABLE_LEVELS);
+
+    for (const lvl of TABLE_LEVELS) {
+      const levelRows = res.levels[lvl];
+      const levelItemsMap = allItems[lvl];
+      expect(Object.keys(levelItemsMap).length).toBe(levelRows.length);
+
+      for (const row of levelRows) {
+        const itemsFromAll = levelItemsMap[row.id] ?? [];
+        expect(itemsFromAll.length).toBeGreaterThan(0);
+
+        const summed = sumRows(itemsFromAll);
+        expect(summed.pyQ).toBeCloseTo(row.sums.pyQ, 6);
+        expect(summed.pyV).toBeCloseTo(row.sums.pyV, 4);
+        expect(summed.cyQ).toBeCloseTo(row.sums.cyQ, 6);
+        expect(summed.cyV).toBeCloseTo(row.sums.cyV, 4);
+
+        const itemsSingle = analyzeItems(sampleDs, q, { level: lvl, value: row.value });
+        expect(itemsFromAll.length).toBe(itemsSingle.length);
+        const byId = new Map(itemsSingle.map((r) => [r.id, r]));
+        for (const it of itemsFromAll) {
+          const match = byId.get(it.id);
+          expect(match).toBeDefined();
+          expect(it.sums.pyQ).toBeCloseTo(match!.sums.pyQ, 6);
+          expect(it.sums.pyV).toBeCloseTo(match!.sums.pyV, 4);
+          expect(it.sums.cyQ).toBeCloseTo(match!.sums.cyQ, 6);
+          expect(it.sums.cyV).toBeCloseTo(match!.sums.cyV, 4);
+          expect(it.gross?.cyV).toBeCloseTo(match!.gross?.cyV ?? 0, 4);
+        }
+      }
+    }
+
+    // Filtered query respects exclusions and filters
+    const filteredQ = baseQuery({ txTypes: ['Sales'] });
+    const filteredRes = analyze(sampleDs, filteredQ);
+    const filteredItems = analyzeAllLevelsItems(sampleDs, filteredQ, TABLE_LEVELS);
+    for (const row of filteredRes.levels.distributor) {
+      const summed = sumRows(filteredItems.distributor[row.id] ?? []);
+      expect(summed.cyV).toBeCloseTo(row.sums.cyV, 4);
+    }
   });
 });

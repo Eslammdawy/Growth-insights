@@ -4,12 +4,15 @@
  */
 import { gunzipSync } from 'fflate';
 import {
+  AllLevelsItemsResult,
   AnalysisQuery,
   AnalysisResult,
   DatasetMeta,
   GroupRow,
   ItemTarget,
+  Level,
   analyze,
+  analyzeAllLevelsItems,
   analyzeItems,
   buildMeta,
   prepare,
@@ -22,13 +25,15 @@ export type WorkerRequest =
   | { id: number; type: 'load-file'; file: File }
   | { id: number; type: 'analyze'; query: AnalysisQuery }
   | { id: number; type: 'cancel'; targetId: number }
-  | { id: number; type: 'items'; query: AnalysisQuery; target: ItemTarget };
+  | { id: number; type: 'items'; query: AnalysisQuery; target: ItemTarget }
+  | { id: number; type: 'all-levels-items'; query: AnalysisQuery; levels?: Level[] };
 
 export type WorkerResponse =
   | { id: number; type: 'progress'; progress: ParseProgress }
   | { id: number; type: 'loaded'; meta: DatasetMeta; sourceName: string }
   | { id: number; type: 'analyzed'; result: AnalysisResult }
   | { id: number; type: 'items'; rows: GroupRow[] }
+  | { id: number; type: 'all-levels-items'; itemsByLevel: AllLevelsItemsResult }
   | { id: number; type: 'cancelled' }
   | { id: number; type: 'error'; message: string; kind?: string; details?: string[] };
 
@@ -168,6 +173,12 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       }
       const rows = analyzeItems(currentDataset, msg.query, msg.target);
       send({ id: msg.id, type: 'items', rows });
+    } else if (msg.type === 'all-levels-items') {
+      if (!currentDataset) {
+        throw new DataError('empty', 'No dataset loaded yet.');
+      }
+      const itemsByLevel = analyzeAllLevelsItems(currentDataset, msg.query, msg.levels);
+      send({ id: msg.id, type: 'all-levels-items', itemsByLevel });
     }
   } catch (err) {
     if (err instanceof DataError) {

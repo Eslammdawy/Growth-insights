@@ -1,7 +1,15 @@
 /**
  * Promise wrapper around `data.worker.ts` with progress callbacks.
  */
-import { AnalysisQuery, AnalysisResult, DatasetMeta, GroupRow, ItemTarget } from '../lib/aggregate';
+import {
+  AllLevelsItemsResult,
+  AnalysisQuery,
+  AnalysisResult,
+  DatasetMeta,
+  GroupRow,
+  ItemTarget,
+  Level,
+} from '../lib/aggregate';
 import { DataError, DataErrorKind } from '../lib/columnar';
 import { ParseProgress } from '../lib/parse';
 import type { WorkerRequest, WorkerResponse } from './data.worker';
@@ -16,7 +24,8 @@ type WorkerPayload =
   | { type: 'load-url'; url: string }
   | { type: 'load-file'; file: File }
   | { type: 'analyze'; query: AnalysisQuery }
-  | { type: 'items'; query: AnalysisQuery; target: ItemTarget };
+  | { type: 'items'; query: AnalysisQuery; target: ItemTarget }
+  | { type: 'all-levels-items'; query: AnalysisQuery; levels?: Level[] };
 
 class DataWorkerClient {
   private worker: Worker | null = null;
@@ -44,6 +53,8 @@ class DataWorkerClient {
           p.resolve(msg.result);
         } else if (msg.type === 'items') {
           p.resolve(msg.rows);
+        } else if (msg.type === 'all-levels-items') {
+          p.resolve(msg.itemsByLevel);
         } else if (msg.type === 'cancelled') {
           p.reject(new DOMException('Aborted', 'AbortError'));
         }
@@ -107,6 +118,11 @@ class DataWorkerClient {
   /** Item breakdown of one table row. */
   items(query: AnalysisQuery, target: ItemTarget): Promise<GroupRow[]> {
     return this.call({ type: 'items', query, target });
+  }
+
+  /** Item breakdowns for all rows across multiple levels in one worker pass. */
+  allLevelsItems(query: AnalysisQuery, levels?: Level[]): Promise<AllLevelsItemsResult> {
+    return this.call({ type: 'all-levels-items', query, levels });
   }
 }
 
