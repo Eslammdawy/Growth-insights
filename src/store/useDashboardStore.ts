@@ -13,6 +13,7 @@ import {
   InsightLevel,
   ItemTarget,
   Level,
+  brandOptions,
   itemOptions,
   subTypeOptions,
 } from '../lib/aggregate';
@@ -46,7 +47,8 @@ function syncHashToUrl(st: DashboardState) {
   if (typeof window === 'undefined') return;
   const next = serializeHashState({
     metric: st.metric,
-    line: st.line,
+    line: st.lines[0] ?? st.line ?? null,
+    lines: st.lines,
     period: st.period,
     mainTypes: st.mainTypes,
     subTypes: st.subTypes,
@@ -90,6 +92,7 @@ export interface DashboardState {
   period: PeriodSelection;
   metric: Metric;
   line: string | null;
+  lines: string[];
   txTypes: TxType[];
   mainTypes: string[];
   subTypes: string[];
@@ -116,6 +119,7 @@ export interface DashboardState {
   fetchItems: (rowId: string, target: ItemTarget) => Promise<void>;
   setMetric: (metric: Metric) => void;
   setLine: (line: string | null) => void;
+  setLines: (lines: string[]) => void;
   setPeriod: (patch: Partial<PeriodSelection>) => void;
   setTxTypes: (txTypes: TxType[]) => void;
   setMainTypes: (mainTypes: string[]) => void;
@@ -149,7 +153,8 @@ function currentQuery(st: DashboardState): AnalysisQuery {
   return {
     period: st.period,
     txTypes: st.txTypes,
-    line: st.line,
+    line: st.lines[0] ?? st.line ?? null,
+    lines: st.lines,
     brands: st.brands,
     items: st.items,
     mainTypes: st.mainTypes,
@@ -173,6 +178,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   period: { cyYear: 2026, pyYear: 2025, quarter: null, month: null, likeForLike: true },
   metric: initialHash.metric ?? 'value',
   line: initialHash.line ?? null,
+  lines: initialHash.lines ?? (initialHash.line ? [initialHash.line] : []),
   txTypes: [...TX_TYPES],
   mainTypes: [],
   subTypes: [],
@@ -206,6 +212,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         sourceName,
         metric: v.metric ?? get().metric,
         line: v.line,
+        lines: v.lines,
         period: v.period,
         mainTypes: v.mainTypes,
         subTypes: v.subTypes,
@@ -282,7 +289,21 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   setLine: (line) => {
-    set({ line });
+    get().setLines(line ? [line] : []);
+  },
+
+  setLines: (lines) => {
+    const st = get();
+    const validBrands = st.meta ? new Set(brandOptions(st.meta, lines)) : null;
+    const nextBrands = validBrands ? st.brands.filter((b) => validBrands.has(b)) : st.brands;
+    const validItems = st.meta ? new Set(itemOptions(st.meta, lines, nextBrands)) : null;
+    const nextItems = validItems ? st.items.filter((i) => validItems.has(i)) : st.items;
+    set({
+      lines,
+      line: lines[0] ?? null,
+      brands: nextBrands,
+      items: nextItems,
+    });
     syncHashToUrl(get());
     void get().refreshAnalysis();
   },
@@ -331,7 +352,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   setBrands: (brands) => {
     const st = get();
-    const validItems = st.meta ? new Set(itemOptions(st.meta, null, brands)) : null;
+    const validItems = st.meta ? new Set(itemOptions(st.meta, st.lines, brands)) : null;
     const nextItems = validItems ? st.items.filter((i) => validItems.has(i)) : st.items;
     set({ brands, items: nextItems });
     syncHashToUrl(get());
@@ -374,6 +395,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   resetFilters: () => {
     set({
       line: null,
+      lines: [],
       txTypes: [...TX_TYPES],
       mainTypes: [],
       subTypes: [],
@@ -426,6 +448,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     set({
       metric: v.metric ?? st.metric,
       line: v.line,
+      lines: v.lines,
       period: v.period,
       mainTypes: v.mainTypes,
       subTypes: v.subTypes,

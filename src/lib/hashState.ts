@@ -10,6 +10,7 @@ const VALID_DRIVER_LEVELS: readonly InsightLevel[] = ['subtype', 'distributor', 
 export interface ParsedHashState {
   metric?: Metric;
   line?: string | null;
+  lines?: string[];
   cyYear?: number;
   quarter?: number | null;
   month?: number | null;
@@ -44,7 +45,26 @@ export function parseHashParams(hashString: string): ParsedHashState {
 
   if (params.has('line')) {
     const l = params.get('line')!;
-    out.line = l === 'all' || l === '' ? null : l;
+    if (l === 'all' || l === '') {
+      out.line = null;
+      out.lines = [];
+    } else {
+      const parts = l.split(',').filter(Boolean);
+      out.lines = parts;
+      out.line = parts[0] ?? null;
+    }
+  }
+
+  if (params.has('lines')) {
+    const ls = params.get('lines')!;
+    if (ls === 'all' || ls === '') {
+      out.line = null;
+      out.lines = [];
+    } else {
+      const parts = ls.split(',').filter(Boolean);
+      out.lines = parts;
+      out.line = parts[0] ?? null;
+    }
   }
 
   if (params.has('year')) {
@@ -162,6 +182,7 @@ export function validateHashAgainstMeta(
 ): {
   metric?: Metric;
   line: string | null;
+  lines: string[];
   period: PeriodSelection;
   mainTypes: string[];
   subTypes: string[];
@@ -177,7 +198,9 @@ export function validateHashAgainstMeta(
   showReturns?: boolean;
   heatmapMode?: HeatmapMode;
 } {
-  const line = parsed.line && meta.lines.includes(parsed.line) ? parsed.line : null;
+  const rawLines = parsed.lines ?? (parsed.line ? [parsed.line] : []);
+  const lines = rawLines.filter((l) => meta.lines.includes(l));
+  const line = lines[0] ?? null;
 
   const cyYear =
     parsed.cyYear && meta.availability.years.includes(parsed.cyYear)
@@ -230,12 +253,12 @@ export function validateHashAgainstMeta(
     ? parsed.txTypes
     : (['Sales', 'Return Sales'] as ('Sales' | 'Return Sales')[]);
 
-  const availableBrands = brandOptions(meta, line);
+  const availableBrands = brandOptions(meta, lines);
   const brands = parsed.brands
     ? parsed.brands.filter((b) => availableBrands.includes(b))
     : [];
 
-  const availableItems = itemOptions(meta, line, brands);
+  const availableItems = itemOptions(meta, lines, brands);
   const items = parsed.items
     ? parsed.items.filter((it) => availableItems.includes(it))
     : [];
@@ -246,6 +269,7 @@ export function validateHashAgainstMeta(
   return {
     metric: parsed.metric,
     line,
+    lines,
     period,
     mainTypes,
     subTypes,
@@ -266,6 +290,7 @@ export function validateHashAgainstMeta(
 export function serializeHashState(state: {
   metric: Metric;
   line?: string | null;
+  lines?: string[];
   period: PeriodSelection;
   mainTypes: string[];
   subTypes?: string[];
@@ -283,7 +308,13 @@ export function serializeHashState(state: {
 }): string {
   const params = new URLSearchParams();
   if (state.metric) params.set('metric', state.metric);
-  if (state.line) params.set('line', state.line);
+  const effLines =
+    state.lines && state.lines.length > 0
+      ? state.lines
+      : state.line
+        ? [state.line]
+        : [];
+  if (effLines.length > 0) params.set('line', effLines.join(','));
   params.set('year', String(state.period.cyYear));
   params.set('q', state.period.quarter === null ? 'all' : String(state.period.quarter));
   if (state.period.month !== null) {

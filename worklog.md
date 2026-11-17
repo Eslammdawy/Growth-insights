@@ -1,8 +1,8 @@
 # Worklog & Application Status (`worklog.md`)
 
-**Last Updated**: 2026-11-05
+**Last Updated**: 2026-11-17
 **Application**: Sales Growth Analyzer
-**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`29/29`), and production Vite build (`npm run build`) pass with zero errors.
+**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`30/30`), and production Vite build (`npm run build`) pass with zero errors.
 
 ---
 
@@ -167,19 +167,28 @@
   - Products with PY sales and zero CY sales are now fully counted across all views, tables, charts, customer dynamics, defector watchlists, PVM waterfalls, and Excel exports, categorized with status `'lost'` (YoY % = `-100.0%`, Δ = `−PY`).
   - Updated test suite (`src/lib/acceptance.test.ts`) to verify that discontinued / PY-only products are included, attributed to their latest PY line, and reflected across all summary totals. All 43 test assertions pass.
 
+### 1.15 Guide Report Multi-Select Line Filter & Latest-Period Line Structure (2026-11-17)
+- **Multi-Line Engine & Options (`src/lib/aggregate.ts`)**:
+  - Added `lines?: string[]` to `AnalysisQuery` and `lines: string[]` to `CascadingFilterOptions`, with `buildContext` resolving `activeLines` from `query.lines` or legacy `query.line`.
+  - Updated `brandOptions` and `itemOptions` via `normalizeLines` to accept single or multiple Lines based on `meta.products`, which reflects each item's globally resolved latest-period `Line` and `Brand` from `computeItemAllocations` (latest CY month first, falling back to latest PY month).
+- **Store & URL Hash Sync (`src/store/useDashboardStore.ts`, `src/lib/hashState.ts`)**:
+  - Added `lines: string[]` and cascading `setLines(lines)` action that narrows `brands` and `items` to the active `lines`, updates `line` (`lines[0] ?? null`), fixes `setBrands` to keep `items` scoped to `st.lines`, and syncs comma-separated `line=` in the URL hash.
+- **Guide Report Banner & Exposure Drill (`src/components/Filters.tsx`, `src/components/ProductCustomerExposure.tsx`)**:
+  - Added a searchable multi-select **Line** dropdown (`Latest Period` scope badge) first in the Guide Report filter bar (**Line → Brand → Product**), backed by `meta` so each dropdown always displays the full latest-period roster for the active upstream selection, with removable `Line:` summary chips.
+  - Updated `ProductCustomerExposure` line-row drilling to append into `lines`.
+- **Docs & Tests (`docs/DECISIONS.md`, `src/lib/acceptance.test.ts`)**:
+  - Updated Decision #8 and added Decision #9 in `docs/DECISIONS.md`; added multi-line aggregation, cascading option, and URL hash round-trip assertions in `src/lib/acceptance.test.ts`.
+
 ---
 
 ## 3. Verification Results & Bundle Size Deltas
 
 - **TypeScript Check (`npm run typecheck`)**: Passed (`0` errors).
-- **Automated Tests (`npm run test`)**: Passed (`29/29` tests across `src/lib/acceptance.test.ts` (25 tests) and `src/lib/exportExcel.test.ts` (4 tests)).
-- **Production Build (`npm run build`)**: Passed cleanly in `6.21s` with zero new runtime dependencies. Lazy-loaded chunk sizes:
-  - `GrowthDrivers-*.js`: `22.33 kB` (`6.71 kB` gzip)
-  - `CustomerDynamics-*.js`: `21.24 kB` (`5.45 kB` gzip)
-  - `ProductCustomerExposure-*.js`: `29.86 kB` (`7.67 kB` gzip)
+- **Automated Tests (`npm test`)**: Passed (`30/30` tests across `src/lib/acceptance.test.ts` (26 tests) and `src/lib/exportExcel.test.ts` (4 tests)).
+- **Production Build (`npm run build`)**: Passed cleanly in `6.17s` with zero new runtime dependencies. Lazy-loaded chunk sizes:
+  - `GrowthDrivers-*.js`: `22.40 kB` (`6.74 kB` gzip)
+  - `CustomerDynamics-*.js`: `24.84 kB` (`6.30 kB` gzip)
+  - `ProductCustomerExposure-*.js`: `28.26 kB` (`7.51 kB` gzip)
   - `KpiInfoTooltip-*.js`: `2.52 kB` (`1.11 kB` gzip)
-  - `MonthChart-*.js`: `31.65 kB` (`8.94 kB` gzip)
-  - `CyTreemap-*.js`: `31.41 kB` (`10.89 kB` gzip)
-  - `BubbleScatterChart-*.js`: `10.55 kB` (`3.37 kB` gzip)
-  - `GrowthChart-*.js`: `8.50 kB` (`2.96 kB` gzip)
-  - `data.worker-*.js`: `40.67 kB`
+  - `MonthChart-*.js`: `43.25 kB` (`10.89 kB` gzip)
+  - `data.worker-*.js`: `41.13 kB`

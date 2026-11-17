@@ -22,5 +22,11 @@ Recorded from the initial design interview (2026-10-22) and updated after the 20
    - The customer's `Brick` (and associated `Territory`) in the most recent period (CY first) is treated as the **updated true Brick**. All PY and CY transactions for that customer are attributed to that CY Brick and CY Territory across the Brick, Territory, and Customer tables, with prior bricks shown in a `+N` tooltip badge on the Customer table.
 7. **Period Scope**:
    - Supports **All Qs** (full year / YTD) as well as any individual quarter (`Q1–Q4`), paired with **All months** or optional single-month selection (`Jan–Dec` under `All Qs`, or the quarter's 3 months under `Q1–Q4`). Auto-detects the latest year as CY, prior year as PY, and defaults to `All Qs` + `All months` with "Like-for-like months" ON.
-8. **Filter Scope Across Line Tabs**:
-   - `Brand` and `Item` selections are remembered per `Line` tab. `MainType`, `TransactionType`, and cross-filter chips are global across tabs. Sidebar Line growth badges respect global filters and drill chips but ignore `Brand`/`Item`. URL hash syncs `line` and `metric`.
+8. **Guide Report Filter Bar (`Line → Brand → Product`) & URL Hash Sync**:
+   - The Guide Report banner (`src/components/Filters.tsx`) provides a 3-step cascading searchable multi-select filter bar: **Line → Brand → Product**.
+   - Selecting one or more `Lines` narrows the `Brand` and `Product` dropdowns to the selected `Line(s)` and auto-clears any previously selected `Brands` or `Products` outside them; selecting `Brands` further narrows `Product` options.
+   - The `Line`, `Brand`, and `Product` dropdowns always list the full latest-period roster assigned to the active upstream selection (independent of TopBar month/quarter filters or table drill chips).
+   - Multi-line selections (`lines`) sync to the URL hash via `line=` (comma-separated) alongside `brands`, `items`, `metric`, period settings, and cross-filter chips.
+9. **Latest-Period Product-to-Line Attribution**:
+   - Because products move between sales lines over time, every product (`Item`) and all of its historical PY and CY transactions are attributed to the `Line` (and `Brand`) recorded in that product's most recent active period in the full dataset (e.g., latest CY month first, falling back to its latest active period in PY if the product had no CY invoices).
+   - This global latest-period structure is fixed regardless of the TopBar period selector, ensuring historical comparisons and Guide Report `Line → Brand → Product` filtering remain consistent across periods.

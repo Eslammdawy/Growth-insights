@@ -109,8 +109,10 @@ export interface DrillChip {
 export interface AnalysisQuery {
   period: PeriodSelection;
   txTypes: TxType[];
-  /** null = All Lines */
+  /** null = All Lines (legacy single-line field; kept in sync with `lines[0]`) */
   line: string | null;
+  /** Empty / undefined = All Lines; non-empty = filter to any of the selected Lines */
+  lines?: string[];
   brands: string[];
   items: string[];
   mainTypes: string[];
@@ -121,6 +123,7 @@ export interface AnalysisQuery {
 }
 
 export interface CascadingFilterOptions {
+  lines: string[];
   mainTypes: string[];
   subTypes: string[];
   distributors: string[];
@@ -711,18 +714,35 @@ export function subTypeOptions(
   return [...s].sort((a, b) => a.localeCompare(b));
 }
 
-/** Brand options for the active Line (all lines when null). */
-export function brandOptions(meta: Pick<DatasetMeta, 'products'>, line: string | null): string[] {
+function normalizeLines(lineOrLines: string | string[] | null | undefined): Set<string> | null {
+  if (!lineOrLines) return null;
+  const arr = Array.isArray(lineOrLines) ? lineOrLines.filter(Boolean) : [lineOrLines];
+  return arr.length > 0 ? new Set(arr) : null;
+}
+
+/** Brand options for the active Line(s) (all lines when empty/null), based on latest-period product structure. */
+export function brandOptions(
+  meta: Pick<DatasetMeta, 'products'>,
+  line: string | string[] | null | undefined = null,
+): string[] {
+  const ls = normalizeLines(line);
   const s = new Set<string>();
-  for (const [l, b] of meta.products) if (line === null || l === line) s.add(b);
+  for (const [l, b] of meta.products) if (ls === null || ls.has(l)) s.add(b);
   return [...s].sort((a, b) => a.localeCompare(b));
 }
 
-/** Item options cascading from Line + selected Brands. */
-export function itemOptions(meta: Pick<DatasetMeta, 'products'>, line: string | null, brands: string[]): string[] {
+/** Item options cascading from active Line(s) + selected Brands, based on latest-period product structure. */
+export function itemOptions(
+  meta: Pick<DatasetMeta, 'products'>,
+  line: string | string[] | null | undefined = null,
+  brands: string[] = [],
+): string[] {
+  const ls = normalizeLines(line);
   const bs = new Set(brands);
   const s = new Set<string>();
-  for (const [l, b, it] of meta.products) if ((line === null || l === line) && (!bs.size || bs.has(b))) s.add(it);
+  for (const [l, b, it] of meta.products) {
+    if ((ls === null || ls.has(l)) && (!bs.size || bs.has(b))) s.add(it);
+  }
   return [...s].sort((a, b) => a.localeCompare(b));
 }
 
@@ -780,6 +800,7 @@ interface QueryContext {
   distMask: Uint8Array | null;
   terrMask: Uint8Array | null;
   /** Product filters. */
+  activeLines: string[] | null;
   lineMask: Uint8Array | null;
   brandMask: Uint8Array | null;
   itemMask: Uint8Array | null;
@@ -822,7 +843,13 @@ function buildContext(ds: Dataset, query: AnalysisQuery): QueryContext {
   if (distMask) globalMasks.push([c.distributor.codes, distMask]);
   if (terrMask) globalMasks.push([c.territory.codes, terrMask]);
 
-  const lineMask = query.line === null ? null : mask(c.line, [query.line]);
+  const activeLines =
+    query.lines && query.lines.length > 0
+      ? query.lines
+      : query.line
+        ? [query.line]
+        : null;
+  const lineMask = activeLines ? mask(c.line, activeLines) : null;
   const brandMask = mask(c.brand, query.brands);
   const itemMask = mask(c.item, query.items);
 
@@ -842,6 +869,7 @@ function buildContext(ds: Dataset, query: AnalysisQuery): QueryContext {
     stMask,
     distMask,
     terrMask,
+    activeLines,
     lineMask,
     brandMask,
     itemMask,
@@ -896,6 +924,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     stMask,
     distMask,
     terrMask,
+    activeLines,
     lineMask,
     brandMask,
     itemMask,
@@ -912,6 +941,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const itemGrossAcc = new Float64Array(nItem * 4);
   const itemCnt = new Int32Array(nItem);
 
+  const lineUsed = new Uint8Array(c.line.dict.length);
   const mtUsed = new Uint8Array(c.mainType.dict.length);
   const stUsed = new Uint8Array(c.subType.dict.length);
   const distUsed = new Uint8Array(c.distributor.dict.length);
@@ -992,6 +1022,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     const v = val[i];
     const off = f === 2 ? 2 : 0;
     const l = lineCodes[i];
+    if (l > 0) lineUsed[l] = 1;
     lineAcc[l * 4 + off] += q;
     lineAcc[l * 4 + off + 1] += v;
     lineCnt[l]++;
@@ -1117,6 +1148,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   };
 
   const filterOptions: CascadingFilterOptions = {
+    lines: collectOpts(c.line, lineUsed, activeLines ?? undefined),
     mainTypes: collectOpts(c.mainType, mtUsed, query.mainTypes),
     subTypes: collectOpts(c.subType, stUsed, query.subTypes),
     distributors: collectOpts(c.distributor, distUsed, query.distributors, excludedDistributors),

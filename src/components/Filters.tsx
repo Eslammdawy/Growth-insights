@@ -213,9 +213,8 @@ export const Filters: React.FC = () => {
   const [, startTransition] = useTransition();
   const {
     meta,
-    result,
-    line,
-    setLine,
+    lines,
+    setLines,
     brands,
     setBrands,
     items,
@@ -225,9 +224,8 @@ export const Filters: React.FC = () => {
   } = useDashboardStore(
     useShallow((s) => ({
       meta: s.meta,
-      result: s.result,
-      line: s.line,
-      setLine: s.setLine,
+      lines: s.lines,
+      setLines: s.setLines,
       brands: s.brands,
       setBrands: s.setBrands,
       items: s.items,
@@ -237,17 +235,17 @@ export const Filters: React.FC = () => {
     }))
   );
 
-  const fo = result?.filterOptions;
+  const availableLines = useMemo(() => meta?.lines ?? [], [meta]);
   const availableBrands = useMemo(
-    () => fo?.brands ?? (meta ? brandOptions(meta, line) : []),
-    [fo, meta, line]
+    () => (meta ? brandOptions(meta, lines) : []),
+    [meta, lines]
   );
   const availableItems = useMemo(
-    () => fo?.items ?? (meta ? itemOptions(meta, line, brands) : []),
-    [fo, meta, line, brands]
+    () => (meta ? itemOptions(meta, lines, brands) : []),
+    [meta, lines, brands]
   );
 
-  const activeFilterCount = (line ? 1 : 0) + brands.length + items.length + drill.length;
+  const activeFilterCount = lines.length + brands.length + items.length + drill.length;
 
   return (
     <section
@@ -270,14 +268,24 @@ export const Filters: React.FC = () => {
             )}
           </div>
 
-          {/* Product & Brand Filters */}
+          {/* Line, Brand & Product Filters */}
           <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-indigo-200/70 bg-indigo-50/35 px-2 py-1 dark:border-indigo-500/20 dark:bg-indigo-950/20">
             <span className="rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-indigo-800 dark:bg-indigo-500/25 dark:text-indigo-200">
-              Product & Brand
+              Line, Brand & Product
             </span>
             <SearchableMultiSelect
+              label="Line"
+              scopeBadge="Latest Period"
+              options={availableLines}
+              selected={lines}
+              onChange={(next) => startTransition(() => setLines(next))}
+              placeholder="All Lines"
+              accent="purple"
+            />
+            <ArrowRight className="hidden h-3 w-3 text-indigo-400 sm:inline-block" />
+            <SearchableMultiSelect
               label="Brand"
-              scopeBadge="Brand"
+              scopeBadge={lines.length > 0 ? `In ${lines.length} Line${lines.length > 1 ? 's' : ''}` : 'Brand'}
               options={availableBrands}
               selected={brands}
               onChange={(next) => startTransition(() => setBrands(next))}
@@ -287,7 +295,13 @@ export const Filters: React.FC = () => {
             <ArrowRight className="hidden h-3 w-3 text-indigo-400 sm:inline-block" />
             <SearchableMultiSelect
               label="Product"
-              scopeBadge={brands.length > 0 ? `In ${brands.length} Brand` : 'Product'}
+              scopeBadge={
+                brands.length > 0
+                  ? `In ${brands.length} Brand${brands.length > 1 ? 's' : ''}`
+                  : lines.length > 0
+                    ? `In ${lines.length} Line${lines.length > 1 ? 's' : ''}`
+                    : 'Product'
+              }
               options={availableItems}
               selected={items}
               onChange={(next) => startTransition(() => setItems(next))}
@@ -300,21 +314,22 @@ export const Filters: React.FC = () => {
         {/* Active Filter Summary Chips + Reset Button */}
         {activeFilterCount > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {line && (
+            {lines.map((l) => (
               <span
+                key={`l-${l}`}
                 className="inline-flex items-center gap-1 rounded-lg border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[11px] font-semibold text-purple-800 dark:text-purple-200"
               >
-                Line: {line}
+                Line: {l}
                 <button
                   type="button"
-                  onClick={() => startTransition(() => setLine(null))}
-                  aria-label={`Remove line ${line}`}
+                  onClick={() => startTransition(() => setLines(lines.filter((x) => x !== l)))}
+                  aria-label={`Remove line ${l}`}
                   className="rounded-full p-0.5 hover:bg-purple-500/20"
                 >
                   <X className="h-3 w-3" />
                 </button>
               </span>
-            )}
+            ))}
             {brands.map((b) => (
               <span
                 key={`b-${b}`}

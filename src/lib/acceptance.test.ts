@@ -236,6 +236,29 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     }
     // Sidebar badges ignore Brand/Item filters
     expect(r.linesTotal.cyV).toBeCloseTo(baseline.linesTotal.cyV, 5);
+
+    // Multi-line filtering via `lines` sums the individual selected Lines
+    if (sampleMeta.lines.length >= 2) {
+      const twoLines = sampleMeta.lines.slice(0, 2);
+      const l1 = analyze(sampleDs, baseQuery({ line: twoLines[0] }));
+      const l2 = analyze(sampleDs, baseQuery({ line: twoLines[1] }));
+      const multi = analyze(sampleDs, baseQuery({ line: null, lines: twoLines }));
+      expect(multi.totals.pyQ).toBeCloseTo(l1.totals.pyQ + l2.totals.pyQ, 6);
+      expect(multi.totals.pyV).toBeCloseTo(l1.totals.pyV + l2.totals.pyV, 4);
+      expect(multi.totals.cyQ).toBeCloseTo(l1.totals.cyQ + l2.totals.cyQ, 6);
+      expect(multi.totals.cyV).toBeCloseTo(l1.totals.cyV + l2.totals.cyV, 4);
+
+      const expectedBrands = new Set([
+        ...brandOptions(sampleMeta, twoLines[0]),
+        ...brandOptions(sampleMeta, twoLines[1]),
+      ]);
+      expect(new Set(brandOptions(sampleMeta, twoLines))).toEqual(expectedBrands);
+      const expectedItems = new Set([
+        ...itemOptions(sampleMeta, twoLines[0], []),
+        ...itemOptions(sampleMeta, twoLines[1], []),
+      ]);
+      expect(new Set(itemOptions(sampleMeta, twoLines, []))).toEqual(expectedItems);
+    }
   });
 
   it('7. Bonus and Return Bonus rows never affect any metric', () => {
@@ -352,6 +375,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     const validated = validateHashAgainstMeta(parsed, sampleMeta, defPeriod);
     expect(validated.metric).toBe('units');
     expect(validated.line).toBe(original.line);
+    expect(validated.lines).toEqual([original.line]);
     expect(validated.period.cyYear).toBe(2026);
     expect(validated.period.quarter).toBe(3);
     expect(validated.period.month).toBe(8);
@@ -361,10 +385,22 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(validated.productExposureLevel).toBe('brand');
     expect(validated.productExposureView).toBe('churn');
 
+    // Multi-line hash round-trip
+    if (sampleMeta.lines.length >= 2) {
+      const twoLines = sampleMeta.lines.slice(0, 2);
+      const multiHash = serializeHashState({ ...original, line: twoLines[0], lines: twoLines });
+      const parsedMulti = parseHashParams(multiHash);
+      expect(parsedMulti.lines).toEqual(twoLines);
+      const validatedMulti = validateHashAgainstMeta(parsedMulti, sampleMeta, defPeriod);
+      expect(validatedMulti.lines).toEqual(twoLines);
+      expect(validatedMulti.line).toBe(twoLines[0]);
+    }
+
     // Invalid parameters fall back to safe defaults
     const invalidParsed = parseHashParams('#line=NonExistentLine&year=1990&q=9&m=99&metric=invalid&txTypes=Unknown&pel=subtype&pev=invalid&drill=malformed{json');
     const safeValidated = validateHashAgainstMeta(invalidParsed, sampleMeta, defPeriod);
     expect(safeValidated.line).toBeNull();
+    expect(safeValidated.lines).toEqual([]);
     expect(safeValidated.metric).toBeUndefined();
     expect(safeValidated.productExposureLevel).toBeUndefined();
     expect(safeValidated.productExposureView).toBeUndefined();
@@ -601,9 +637,12 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     // Both Capital 1 (from PY-only discontinued item fallback) and Capital 3 exist in the effective structure
     expect(meta.lines).toEqual(['Capital 1', 'Capital 3']);
     expect(brandOptions(meta, null)).toEqual(['AMPOFER', 'OLD_BRAND']);
+    expect(brandOptions(meta, ['Capital 3'])).toEqual(['AMPOFER']);
+    expect(brandOptions(meta, ['Capital 1', 'Capital 3'])).toEqual(['AMPOFER', 'OLD_BRAND']);
     expect(itemOptions(meta, null, [])).toEqual(['Ampofer 100 mg 5 Amp', 'PY Only Discontinued']);
     expect(itemOptions(meta, 'Capital 1', [])).toEqual(['PY Only Discontinued']);
     expect(itemOptions(meta, 'Capital 3', [])).toEqual(['Ampofer 100 mg 5 Amp']);
+    expect(itemOptions(meta, ['Capital 1', 'Capital 3'], [])).toEqual(['Ampofer 100 mg 5 Amp', 'PY Only Discontinued']);
 
     const q = baseQuery({
       period: { cyYear: 2026, pyYear: 2025, quarter: 3, month: null, likeForLike: false },
@@ -623,10 +662,15 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     // Filtering by Capital 1 includes the discontinued PY-only item
     const cap1Res = analyze(reallocDs, { ...q, line: 'Capital 1' });
     expect(cap1Res.totals).toEqual({ pyQ: 999, pyV: 99999, cyQ: 0, cyV: 0 });
+
+    // Multi-line filtering via `lines` includes both lines and matches total
+    const bothRes = analyze(reallocDs, { ...q, line: null, lines: ['Capital 1', 'Capital 3'] });
+    expect(bothRes.totals).toEqual(allRes.totals);
   });
 
   it('17. Guided cascading filters (Channel -> Market -> Product) narrow downstream options and filter totals without line selection', () => {
     const baseline = analyze(sampleDs, baseQuery());
+    expect(baseline.filterOptions.lines.length).toBeGreaterThan(0);
     expect(baseline.filterOptions.mainTypes.length).toBeGreaterThan(0);
     expect(baseline.filterOptions.subTypes.length).toBeGreaterThan(0);
     expect(baseline.filterOptions.distributors.length).toBeGreaterThan(0);

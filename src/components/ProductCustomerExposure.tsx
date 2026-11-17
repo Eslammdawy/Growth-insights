@@ -116,7 +116,8 @@ export const ProductCustomerExposure: React.FC = () => {
     brands,
     setBrands,
     line,
-    setLine,
+    lines,
+    setLines,
     drill,
     addDrillRow,
     resetFilters,
@@ -134,7 +135,8 @@ export const ProductCustomerExposure: React.FC = () => {
       brands: s.brands,
       setBrands: s.setBrands,
       line: s.line,
-      setLine: s.setLine,
+      lines: s.lines,
+      setLines: s.setLines,
       drill: s.drill,
       addDrillRow: s.addDrillRow,
       resetFilters: s.resetFilters,
@@ -261,7 +263,9 @@ export const ProductCustomerExposure: React.FC = () => {
           }
         } else if (row.level === 'line') {
           const lVal = row.line ?? row.itemLabel;
-          setLine(lVal);
+          if (!lines.includes(lVal)) {
+            setLines([...lines, lVal]);
+          }
         }
       });
       const el = document.getElementById('table-customer');
@@ -269,7 +273,7 @@ export const ProductCustomerExposure: React.FC = () => {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     },
-    [addDrillRow, brands, setBrands, setLine],
+    [addDrillRow, brands, setBrands, lines, setLines],
   );
 
   const handleExport = useCallback(() => {
@@ -291,7 +295,7 @@ export const ProductCustomerExposure: React.FC = () => {
   const totalNeutralColor = isDark ? '#6366f1' : '#4f46e5';
 
   const levelLabel = PRODUCT_EXPOSURE_LEVEL_LABEL[productExposureLevel];
-  const hasAnyFilter = Boolean(line) || brands.length > 0 || drill.length > 0;
+  const hasAnyFilter = lines.length > 0 || Boolean(line) || brands.length > 0 || drill.length > 0;
   const activeSegFilter: CustomerSegment | null =
     customerStatusFilter !== 'all' ? (customerStatusFilter as CustomerSegment) : null;
 
