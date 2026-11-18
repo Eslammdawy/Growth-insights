@@ -57,10 +57,12 @@ import {
 } from './periods';
 
 export type Level = 'subtype' | 'distributor' | 'chain' | 'territory' | 'brick' | 'customer';
-/** Display order of the level tables on the dashboard. */
+/** Display order of all aggregation levels computed in the engine. */
 export const LEVELS: Level[] = ['subtype', 'distributor', 'chain', 'territory', 'brick', 'customer'];
 /** Display order of the level tables rendered on the dashboard. */
-export const TABLE_LEVELS: Level[] = ['subtype', 'distributor', 'chain', 'territory', 'customer'];
+export const TABLE_LEVELS: Level[] = ['subtype', 'chain', 'territory', 'customer'];
+/** Selectable levels in dashboard charts (GrowthChart, BubbleScatterChart). */
+export const CHART_LEVELS: Level[] = ['subtype', 'chain', 'territory', 'brick', 'customer'];
 export const LEVEL_LABEL: Record<Level, string> = {
   subtype: 'SubType',
   distributor: 'Distributor',
@@ -70,11 +72,12 @@ export const LEVEL_LABEL: Record<Level, string> = {
   customer: 'Customer',
 };
 
-export type InsightLevel = 'subtype' | 'distributor' | 'territory' | 'brick' | 'item';
-export const INSIGHT_LEVELS: InsightLevel[] = ['subtype', 'distributor', 'territory', 'brick', 'item'];
+export type InsightLevel = 'subtype' | 'distributor' | 'chain' | 'territory' | 'brick' | 'item';
+export const INSIGHT_LEVELS: InsightLevel[] = ['subtype', 'chain', 'territory', 'brick', 'item'];
 export const INSIGHT_LEVEL_LABEL: Record<InsightLevel, string> = {
   subtype: 'SubType',
   distributor: 'Distributor',
+  chain: 'Chains',
   territory: 'Territory',
   brick: 'Brick',
   item: 'Item',
@@ -250,6 +253,8 @@ export interface DatasetMeta {
   channels: [string, string][];
   /** Unique (line, brand, item) triples for cascading filter options. */
   products: [string, string, string][];
+  /** Unique (item, distributor) pairs (whole dataset) for narrowing Distributor options by product selection. */
+  itemDistributors?: [string, string][];
   transactionTypes: { name: string; rows: number; included: boolean }[];
 }
 
@@ -415,10 +420,90 @@ export function prepare(ds: Dataset): Prepared {
   const customerName = strCol(ds, 'CustomerName');
   const rawBrick = strCol(ds, 'Brick');
   const rawTerritory = strCol(ds, 'Territory');
-  const subType = strCol(ds, 'SubType');
+  const rawSubType = strCol(ds, 'SubType');
+  const rawChain = strCol(ds, 'Chain');
   const customer = buildCustomerColumn(n, customerId, customerName);
 
-  const { info, brickOf, territoryOf } = computeCustomers(
+  // Normalize SubType & Chain:
+  // 1) Ezzaby/Ezaby SubType -> SubType='Chain', Chain='Ezzaby' (removes Ezzaby from SubType altogether).
+  // 2) Any row with a named Chain -> SubType='Chain'.
+  const subTypeDict = [...rawSubType.dict];
+  let chainSubCode = subTypeDict.indexOf('Chain');
+  if (chainSubCode < 0) {
+    chainSubCode = subTypeDict.length;
+    subTypeDict.push('Chain');
+  }
+  const chainDict = [...rawChain.dict];
+  let ezzabyChainCode = chainDict.indexOf('Ezzaby');
+  if (ezzabyChainCode < 0) {
+    ezzabyChainCode = chainDict.length;
+    chainDict.push('Ezzaby');
+  }
+  const isEzzabySubCode = new Uint8Array(rawSubType.dict.length);
+  rawSubType.dict.forEach((s, k) => {
+    const low = s.trim().toLowerCase();
+    if (low === 'ezzaby' || low === 'ezaby') isEzzabySubCode[k] = 1;
+  });
+  const isNamedChainCode = new Uint8Array(rawChain.dict.length);
+  rawChain.dict.forEach((s, k) => {
+    const t = s.trim();
+    if (t !== '' && t !== UNASSIGNED_LABEL && t !== UNASSIGNED_CHAIN_LABEL) {
+      isNamedChainCode[k] = 1;
+    }
+  });
+  const normSubCodes = new Int32Array(n);
+  const normChainCodes = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const st = rawSubType.codes[i];
+    const ch = rawChain.codes[i];
+    if (isEzzabySubCode[st]) {
+      normSubCodes[i] = chainSubCode;
+      normChainCodes[i] = ezzabyChainCode;
+    } else if (isNamedChainCode[ch]) {
+      normSubCodes[i] = chainSubCode;
+      normChainCodes[i] = ch;
+    } else {
+      normSubCodes[i] = st;
+      normChainCodes[i] = 0;
+    }
+  }
+
+  // 3) If a customer has both Stores (or Store) and Private across active transactions (in PY or CY),
+  //    normalize all of their Private rows to Stores before customer-attribute computation.
+  const isStoresSubCode = new Uint8Array(subTypeDict.length);
+  const isPrivateSubCode = new Uint8Array(subTypeDict.length);
+  let storesTargetCode = subTypeDict.indexOf('Stores');
+  subTypeDict.forEach((s, k) => {
+    const low = s.trim().toLowerCase();
+    if (low === 'stores' || low === 'store') {
+      isStoresSubCode[k] = 1;
+      if (storesTargetCode < 0) storesTargetCode = k;
+    } else if (low === 'private') {
+      isPrivateSubCode[k] = 1;
+    }
+  });
+  if (storesTargetCode > 0) {
+    const nCust = customer.dict.length;
+    const storePrivMask = new Uint8Array(nCust);
+    for (let i = 0; i < n; i++) {
+      if (!tx[i]) continue;
+      const cu = customer.codes[i];
+      if (cu === 0) continue;
+      const st = normSubCodes[i];
+      if (isStoresSubCode[st]) storePrivMask[cu] |= 1;
+      else if (isPrivateSubCode[st]) storePrivMask[cu] |= 2;
+    }
+    for (let i = 0; i < n; i++) {
+      const cu = customer.codes[i];
+      if (cu !== 0 && storePrivMask[cu] === 3 && isPrivateSubCode[normSubCodes[i]]) {
+        normSubCodes[i] = storesTargetCode;
+      }
+    }
+  }
+
+  const normSubType: StrColumn = { kind: 'str', name: 'SubType', dict: subTypeDict, codes: normSubCodes };
+
+  const { info, brickOf, territoryOf, subTypeOf } = computeCustomers(
     n,
     periods,
     periodIdx,
@@ -428,12 +513,13 @@ export function prepare(ds: Dataset): Prepared {
     customerName,
     rawBrick,
     rawTerritory,
-    subType,
+    normSubType,
   );
 
-  // Effective Brick / Territory columns (same dictionaries, remapped codes).
+  // Effective Brick / Territory / SubType columns (same dictionaries, remapped codes).
   const effBrick = new Int32Array(n);
   const effTerr = new Int32Array(n);
+  const effSubType = new Int32Array(n);
   for (let i = 0; i < n; i++) {
     const cu = customer.codes[i];
     if (cu !== 0 && brickOf[cu] >= 0) {
@@ -442,6 +528,12 @@ export function prepare(ds: Dataset): Prepared {
     } else {
       effBrick[i] = rawBrick.codes[i];
       effTerr[i] = rawTerritory.codes[i];
+    }
+    if (normChainCodes[i] > 0) {
+      effSubType[i] = chainSubCode;
+    } else {
+      const custSt = cu !== 0 ? subTypeOf[cu] : -1;
+      effSubType[i] = custSt > 0 && custSt !== chainSubCode ? custSt : normSubCodes[i];
     }
   }
 
@@ -458,10 +550,10 @@ export function prepare(ds: Dataset): Prepared {
       brand: { kind: 'str', name: 'Brand', dict: rawBrand.dict, codes: effBrand },
       item,
       mainType: strCol(ds, 'MainType'),
-      subType,
+      subType: { kind: 'str', name: 'SubType', dict: subTypeDict, codes: effSubType },
       brick: { kind: 'str', name: 'Brick', dict: rawBrick.dict, codes: effBrick },
       territory: { kind: 'str', name: 'Territory', dict: rawTerritory.dict, codes: effTerr },
-      chain: strCol(ds, 'Chain'),
+      chain: { kind: 'str', name: 'Chain', dict: chainDict, codes: normChainCodes },
       customer,
       distributor: strCol(ds, 'Distributor'),
       transactionType,
@@ -567,7 +659,7 @@ function computeCustomers(
   brick: StrColumn,
   territory: StrColumn,
   subType: StrColumn,
-): { info: Map<number, CustomerInfo>; brickOf: Int32Array; territoryOf: Int32Array } {
+): { info: Map<number, CustomerInfo>; brickOf: Int32Array; territoryOf: Int32Array; subTypeOf: Int32Array } {
   const nCust = customer.dict.length;
   const latest = new Float64Array(nCust).fill(-Infinity);
   for (let i = 0; i < n; i++) {
@@ -619,12 +711,14 @@ function computeCustomers(
   const info = new Map<number, CustomerInfo>();
   const brickOf = new Int32Array(nCust).fill(-1);
   const territoryOf = new Int32Array(nCust).fill(-1);
+  const subTypeOf = new Int32Array(nCust).fill(-1);
   for (const [c, bset] of brickAll) {
     const b = Math.max(0, pick(brickCount.get(c)));
     const s = Math.max(0, pick(subCount.get(c)));
     const tk = pick(terrCount.get(c), (k) => Math.floor(k / nTerr) === b);
     brickOf[c] = b;
     territoryOf[c] = tk < 0 ? 0 : tk % nTerr;
+    subTypeOf[c] = s;
     const sset = subAll.get(c) ?? new Set<number>();
     info.set(c, {
       id: customerId.dict[idCode[c]],
@@ -635,7 +729,7 @@ function computeCustomers(
       subTypeOthers: [...sset].filter((k) => k !== s).map((k) => subType.dict[k] || UNASSIGNED_LABEL).sort(),
     });
   }
-  return { info, brickOf, territoryOf };
+  return { info, brickOf, territoryOf, subTypeOf };
 }
 
 export function buildMeta(ds: Dataset): DatasetMeta {
@@ -646,6 +740,8 @@ export function buildMeta(ds: Dataset): DatasetMeta {
   const tripleList: [string, string, string][] = [];
   const channelPairs = new Set<string>();
   const channelList: [string, string][] = [];
+  const itemDistPairs = new Set<string>();
+  const itemDistList: [string, string][] = [];
   const lineUsed = new Uint8Array(line.dict.length);
   const mtUsed = new Uint8Array(mainType.dict.length);
   const stUsed = new Uint8Array(subType.dict.length);
@@ -666,6 +762,11 @@ export function buildMeta(ds: Dataset): DatasetMeta {
     if (st > 0) stUsed[st] = 1;
     if (d > 0 && !excludedDistributors.has(distributor.dict[d].trim().toLowerCase())) {
       distUsed[d] = 1;
+      const idKey = `${it}|${d}`;
+      if (!itemDistPairs.has(idKey)) {
+        itemDistPairs.add(idKey);
+        itemDistList.push([item.dict[it], distributor.dict[d]]);
+      }
     }
     if (tr > 0) terrUsed[tr] = 1;
     txRows[transactionType.codes[i]]++;
@@ -694,10 +795,18 @@ export function buildMeta(ds: Dataset): DatasetMeta {
     territories: used(territory, terrUsed),
     channels: channelList,
     products: tripleList,
+    itemDistributors: itemDistList,
     transactionTypes: transactionType.dict
       .map((name, k) => ({ name: name || UNASSIGNED_LABEL, rows: txRows[k], included: normTx(name) !== null }))
       .filter((t) => t.rows > 0),
   };
+}
+
+/** Product selection used to narrow Distributor options (Line → Brand → Product → Distributor). */
+export interface ProductScope {
+  lines?: string[];
+  brands?: string[];
+  items?: string[];
 }
 
 /** SubType options cascading from selected MainTypes (all SubTypes when empty). */
@@ -712,6 +821,30 @@ export function subTypeOptions(
     if (ms.has(mt)) s.add(st);
   }
   return [...s].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Distributor options (excluding EXCLUDED_DISTRIBUTORS) and, when a
+ * product scope is given, narrowed to Distributors with sales (whole dataset) for the selected
+ * Line(s) / Brand(s) / Product(s).
+ */
+export function distributorOptions(
+  meta: Pick<DatasetMeta, 'distributors'> & Partial<Pick<DatasetMeta, 'products' | 'itemDistributors'>>,
+  scope?: ProductScope,
+): string[] {
+  let out = meta.distributors;
+  const lines = scope?.lines ?? [];
+  const brands = scope?.brands ?? [];
+  const items = scope?.items ?? [];
+  if ((lines.length || brands.length || items.length) && meta.itemDistributors && meta.products) {
+    const scopedItems = new Set(
+      items.length ? items : itemOptions({ products: meta.products }, lines, brands),
+    );
+    const allowed = new Set<string>();
+    for (const [it, dist] of meta.itemDistributors) if (scopedItems.has(it)) allowed.add(dist);
+    out = out.filter((d) => allowed.has(d));
+  }
+  return out;
 }
 
 function normalizeLines(lineOrLines: string | string[] | null | undefined): Set<string> | null {
@@ -1257,9 +1390,11 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   }
 
   const distTotals = sumRows(levels.distributor);
+  const chainTotals = sumRows(levels.chain);
   const byLevel: Record<InsightLevel, ContributionRow[]> = {
     subtype: levels.subtype.map((r) => toContributionRow(r, totals)),
     distributor: levels.distributor.map((r) => toContributionRow(r, totals)),
+    chain: levels.chain.map((r) => toContributionRow(r, totals)),
     territory: levels.territory.map((r) => toContributionRow(r, totals)),
     brick: levels.brick.map((r) => toContributionRow(r, totals)),
     item: itemRows.map((r) => toContributionRow(r, totals)),
@@ -1278,6 +1413,10 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     distributor: decomposePriceVolume(
       levels.distributor.map((r) => r.sums),
       distTotals,
+    ),
+    chain: decomposePriceVolume(
+      levels.chain.map((r) => r.sums),
+      chainTotals,
     ),
     territory: decomposePriceVolume(
       levels.territory.map((r) => r.sums),

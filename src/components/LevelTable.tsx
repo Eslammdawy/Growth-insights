@@ -649,10 +649,15 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     overscan: 12,
   });
 
-  const tableTotals = useMemo(() => sumRows(rowList), [rowList]);
+  const isTableFiltered = Boolean(deferredSearch.trim()) || status !== 'all' || topN !== null;
+  const footerRows = useMemo(
+    () => (isTableFiltered ? topRows.map((x) => x.row) : rowList),
+    [isTableFiltered, topRows, rowList],
+  );
+  const tableTotals = useMemo(() => sumRows(footerRows), [footerRows]);
   const tableGrossTotals = useMemo(() => {
     const s = emptySums();
-    for (const r of rowList) {
+    for (const r of footerRows) {
       if (r.gross) {
         s.pyQ += r.gross.pyQ;
         s.pyV += r.gross.pyV;
@@ -661,7 +666,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
       }
     }
     return s;
-  }, [rowList]);
+  }, [footerRows]);
 
   // Flat export: every visible parent row (status / search / Top-N, current sort order)
   // broken down into all of its Items, regardless of what is expanded on screen.
@@ -697,6 +702,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   const totalReturnsPct = returnsRatePct(tableTotals.cyV, tableGrossTotals.cyV);
   const isPartialLevel = level === 'distributor' || level === 'chain';
   const label = LEVEL_LABEL[level];
+  const pluralLabel = label.endsWith('s') ? label.toLowerCase() : `${label.toLowerCase()}s`;
   const themeStyle = LEVEL_THEME[level];
   const totalUp = total.status === 'growing' || total.status === 'new';
   const totalDown = total.status === 'declining' || total.status === 'lost';
@@ -959,7 +965,9 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
             <tfoot className="sticky bottom-0 z-20 border-t-2 border-indigo-400/50 bg-gradient-to-r from-indigo-950 via-violet-950 to-slate-900 font-bold text-white shadow-inner backdrop-blur-md">
               <tr>
                 <td className="px-3 py-2.5 text-indigo-100" colSpan={1 + extraCols}>
-                  Total ({rowList.length.toLocaleString('en-US')} {label.toLowerCase()}s)
+                  {isTableFiltered
+                    ? `Filtered Subtotal (${topRows.length.toLocaleString('en-US')} of ${rowList.length.toLocaleString('en-US')} ${pluralLabel})`
+                    : `Total (${rowList.length.toLocaleString('en-US')} ${pluralLabel})`}
                 </td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-violet-200">{fmtMetric(total.py, metric, false)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-cyan-300">{fmtMetric(total.cy, metric, false)}</td>
@@ -994,7 +1002,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
                       {fmtPp(totalContribPp)}
                     </span>
                     <span className="text-[10px] font-medium text-indigo-200/80">
-                      {isPartialLevel ? 'of portfolio YoY %' : '= portfolio YoY %'}
+                      {isPartialLevel || isTableFiltered ? 'of portfolio YoY %' : '= portfolio YoY %'}
                     </span>
                   </div>
                 </td>

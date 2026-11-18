@@ -14,7 +14,9 @@ import {
   InsightLevel,
   ItemTarget,
   Level,
+  ProductScope,
   brandOptions,
+  distributorOptions,
   itemOptions,
   subTypeOptions,
 } from '../lib/aggregate';
@@ -167,6 +169,13 @@ function currentQuery(st: DashboardState): AnalysisQuery {
   };
 }
 
+/** Drops selected Distributors that have no sales for the given product scope (Line → Brand → Product → Distributor). */
+function pruneDistributors(st: DashboardState, scope: ProductScope): string[] {
+  if (!st.meta || st.distributors.length === 0) return st.distributors;
+  const valid = new Set(distributorOptions(st.meta, scope));
+  return st.distributors.filter((d) => valid.has(d));
+}
+
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   meta: null,
   sourceName: '',
@@ -314,6 +323,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       line: lines[0] ?? null,
       brands: nextBrands,
       items: nextItems,
+      distributors: pruneDistributors(st, { lines, brands: nextBrands, items: nextItems }),
     });
     syncHashToUrl(get());
     void get().refreshAnalysis();
@@ -334,7 +344,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   setMainTypes: (mainTypes) => {
     const st = get();
-    const validSubTypes = st.meta ? new Set(subTypeOptions(st.meta, mainTypes)) : null;
+    const validSubTypes = st.meta
+      ? new Set(subTypeOptions(st.meta, mainTypes))
+      : null;
     const nextSubTypes = validSubTypes
       ? st.subTypes.filter((s) => validSubTypes.has(s))
       : st.subTypes;
@@ -365,13 +377,18 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     const st = get();
     const validItems = st.meta ? new Set(itemOptions(st.meta, st.lines, brands)) : null;
     const nextItems = validItems ? st.items.filter((i) => validItems.has(i)) : st.items;
-    set({ brands, items: nextItems });
+    set({
+      brands,
+      items: nextItems,
+      distributors: pruneDistributors(st, { lines: st.lines, brands, items: nextItems }),
+    });
     syncHashToUrl(get());
     void get().refreshAnalysis();
   },
 
   setItems: (items) => {
-    set({ items });
+    const st = get();
+    set({ items, distributors: pruneDistributors(st, { lines: st.lines, brands: st.brands, items }) });
     syncHashToUrl(get());
     void get().refreshAnalysis();
   },

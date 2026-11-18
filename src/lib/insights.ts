@@ -16,11 +16,12 @@ import {
   isZero,
 } from './metrics';
 
-export const DRIVER_LEVELS: InsightLevel[] = ['subtype', 'distributor', 'territory', 'item'];
+export const DRIVER_LEVELS: InsightLevel[] = ['subtype', 'chain', 'territory', 'item'];
 
 export const DRIVER_LEVEL_LABEL: Record<InsightLevel, string> = {
   subtype: 'SubType',
   distributor: 'Distributor',
+  chain: 'Chains',
   territory: 'Territory',
   brick: 'Brick',
   item: 'Item',

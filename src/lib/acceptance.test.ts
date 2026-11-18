@@ -19,6 +19,7 @@ import {
   analyzeItems,
   buildMeta,
   brandOptions,
+  distributorOptions,
   itemOptions,
   subTypeOptions,
   sumRows,
@@ -62,9 +63,12 @@ const baseQuery = (overrides: Partial<AnalysisQuery> = {}): AnalysisQuery => ({
 });
 
 describe('Acceptance tests (Sales Growth Analyzer)', () => {
-  it('1. Sum of rows at every non-excluded level equals the grand total, and Distributor excludes Ezaby', () => {
+  it('1. Sum of rows at every non-excluded level equals the grand total, Ezzaby is removed from SubType, and Chain equals Chains level', () => {
     const res = analyze(sampleDs, baseQuery());
+    expect(TABLE_LEVELS).toEqual(['subtype', 'chain', 'territory', 'customer']);
     expect(res.levels.distributor.find((r) => r.value.toLowerCase() === 'ezaby')).toBeUndefined();
+    expect(res.levels.subtype.find((r) => r.value.toLowerCase().includes('ez'))).toBeUndefined();
+    expect(sampleMeta.subTypes.find((s) => s.toLowerCase().includes('ez'))).toBeUndefined();
     for (const level of LEVELS.filter((l) => l !== 'distributor' && l !== 'chain')) {
       const rows = res.levels[level];
       expect(rows.length).toBeGreaterThan(0);
@@ -83,7 +87,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       }
     }
 
-    // Dedicated Chain level has only named chains and excludes unassigned
+    // Dedicated Chain level has only named chains, excludes unassigned, and matches SubType='Chain'
     const chainRows = res.levels.chain;
     expect(chainRows.length).toBeGreaterThan(0);
     for (const r of chainRows) {
@@ -91,9 +95,15 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       expect(r.label).not.toBe(UNASSIGNED_LABEL);
       expect(r.label).not.toBe(UNASSIGNED_CHAIN_LABEL);
     }
+    const chainSub = res.levels.subtype.find((r) => r.value === 'Chain')!;
+    const chainLevelSum = sumRows(chainRows);
+    expect(chainLevelSum.pyQ).toBeCloseTo(chainSub.sums.pyQ, 6);
+    expect(chainLevelSum.pyV).toBeCloseTo(chainSub.sums.pyV, 4);
+    expect(chainLevelSum.cyQ).toBeCloseTo(chainSub.sums.cyQ, 6);
+    expect(chainLevelSum.cyV).toBeCloseTo(chainSub.sums.cyV, 4);
   });
 
-  it('2. Children of each expandable SubType (Chain) sum to the parent row', () => {
+  it('2. Children of each expandable SubType (Chain) sum to the parent row and include Ezzaby', () => {
     const res = analyze(sampleDs, baseQuery());
     const subtypeRows = res.levels.subtype;
     for (const expSub of EXPANDABLE_SUBTYPES) {
@@ -109,9 +119,11 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     const priv = subtypeRows.find((r) => r.value === 'Private')!;
     expect(priv.children).toBeUndefined();
 
-    // Ezzaby is NOT expandable per Q3 decision
+    // Ezzaby is removed from SubType and merged into Chain -> Ezzaby
     const ezzaby = subtypeRows.find((r) => r.value === 'Ezzaby');
-    expect(ezzaby?.children).toBeUndefined();
+    expect(ezzaby).toBeUndefined();
+    const chainParent = subtypeRows.find((r) => r.value === 'Chain')!;
+    expect(chainParent.children!.find((c) => c.value === 'Ezzaby')).toBeDefined();
   });
 
   it('3. Per-row Item drilldown (analyzeItems) returns items summing to the parent entity for any level and chain child', () => {
@@ -301,6 +313,10 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     const brickCe2 = res.levels.brick.find((r) => r.value === 'Cairo East 2')!;
     expect(brickCe2.sums).toEqual({ pyQ: 100, pyV: 5000, cyQ: 150, cyV: 9000 });
 
+    // Customer C-200 ("New Pharmacy") has SubType="Private" and Chain="Yasser Hefny", so SubType is normalized to "Chain".
+    const c200 = res.levels.customer.find((r) => r.customerId === 'C-200')!;
+    expect(c200.subType).toBe('Chain');
+
     // Item drill-down on the CY brick includes both PY and CY sales of that customer
     const brickItems = analyzeItems(edgeDs, q, { level: 'brick', value: 'Cairo East 2' });
     expect(sumRows(brickItems)).toEqual({ pyQ: 100, pyV: 5000, cyQ: 150, cyV: 9000 });
@@ -471,7 +487,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     const totalGrowthV_pp = ((res.totals.cyV - res.totals.pyV) / res.totals.pyV) * 100;
     const totalGrowthQ_pp = ((res.totals.cyQ - res.totals.pyQ) / res.totals.pyQ) * 100;
 
-    for (const lvl of INSIGHT_LEVELS.filter((l) => l !== 'distributor')) {
+    for (const lvl of INSIGHT_LEVELS.filter((l) => l !== 'distributor' && l !== 'chain')) {
       const rows = res.insights.byLevel[lvl];
       expect(rows.length).toBeGreaterThan(0);
 
@@ -502,7 +518,7 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(pvm.pureVolumeEffect + pvm.mixEffect).toBeCloseTo(pvm.volumeEffect, 4);
 
     // Every insight level's PVM summary also satisfies additivity
-    for (const lvl of INSIGHT_LEVELS.filter((l) => l !== 'distributor')) {
+    for (const lvl of INSIGHT_LEVELS.filter((l) => l !== 'distributor' && l !== 'chain')) {
       const lPvm = res.insights.levelPvmSummary[lvl];
       expect(
         lPvm.volumeEffect + lPvm.priceEffect + lPvm.newEffect + lPvm.lostEffect,
@@ -710,6 +726,32 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       }),
     );
     expect(withItemDrill.totals.cyV).toBeLessThan(baseline.totals.cyV);
+  });
+
+  it('17b. Distributor options narrow by Line/Brand/Product selection (whole dataset) and filter totals', () => {
+    expect(sampleMeta.itemDistributors?.length ?? 0).toBeGreaterThan(0);
+    // No product scope → all Distributors
+    expect(distributorOptions(sampleMeta, {})).toEqual(sampleMeta.distributors);
+
+    const item = sampleMeta.products[0][2];
+    const expected = [
+      ...new Set(sampleMeta.itemDistributors!.filter(([it]) => it === item).map(([, d]) => d)),
+    ].sort((a, b) => a.localeCompare(b));
+    const scoped = distributorOptions(sampleMeta, { items: [item] });
+    expect(scoped).toEqual(expected);
+    expect(scoped.length).toBeGreaterThan(0);
+
+    // Line scope is a superset of any single item scope within that line
+    const line = sampleMeta.products[0][0];
+    const byLine = new Set(distributorOptions(sampleMeta, { lines: [line] }));
+    for (const d of scoped) expect(byLine.has(d)).toBe(true);
+
+    // A Distributor with no sales for the item (anywhere in the dataset) can never match rows
+    const outside = sampleMeta.distributors.find((d) => !scoped.includes(d));
+    if (outside) {
+      const res = analyze(sampleDs, baseQuery({ items: [item], distributors: [outside] }));
+      expect(res.matchedRows).toBe(0);
+    }
   });
 
   it('18. WI-2: Sum of LevelTable row Contrib. pp over any full level equals portfolio YoY Growth %', () => {
@@ -1299,9 +1341,219 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     const filteredQ = baseQuery({ txTypes: ['Sales'] });
     const filteredRes = analyze(sampleDs, filteredQ);
     const filteredItems = analyzeAllLevelsItems(sampleDs, filteredQ, TABLE_LEVELS);
-    for (const row of filteredRes.levels.distributor) {
-      const summed = sumRows(filteredItems.distributor[row.id] ?? []);
+    for (const row of filteredRes.levels.chain) {
+      const summed = sumRows(filteredItems.chain[row.id] ?? []);
       expect(summed.cyV).toBeCloseTo(row.sums.cyV, 4);
     }
+  });
+
+  it('28. SubType/Chain normalization: Ezzaby -> Chain(Ezzaby), named Chain -> SubType=Chain, Stores+Private -> Stores, and latest-period SubType unification', () => {
+    const normDs = datasetFromRows([
+      // Ezzaby SubType with Chain="Other_Chains" should remap to SubType="Chain", Chain="Ezzaby"
+      {
+        Date: 202507,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Ezzaby',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: 'Other_Chains',
+        CustomerID: 'C-EZ1',
+        CustomerName: 'Ezzaby Branch 1',
+        Distributor: 'Dummy_HPG',
+        TransactionType: 'Sales',
+        Quantity: 10,
+        Value: 1000,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Ezzaby',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: 'Ezzaby',
+        CustomerID: 'C-EZ1',
+        CustomerName: 'Ezzaby Branch 1',
+        Distributor: 'Ezaby',
+        TransactionType: 'Sales',
+        Quantity: 20,
+        Value: 2000,
+      },
+      // Private SubType with non-empty Chain="Seif PH" should remap to SubType="Chain"
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Giza 1',
+        Territory: 'Giza',
+        Chain: 'Seif PH',
+        CustomerID: 'C-CH1',
+        CustomerName: 'Seif Branch 1',
+        Distributor: 'Direct HPG',
+        TransactionType: 'Sales',
+        Quantity: 15,
+        Value: 1500,
+      },
+      // Customer with both Stores (PY) and Private (CY) should normalize all rows to Stores with no +1 badge
+      {
+        Date: 202507,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Stores',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SP1',
+        CustomerName: 'Store Plus Private',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 30,
+        Value: 3000,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SP1',
+        CustomerName: 'Store Plus Private',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 40,
+        Value: 4000,
+      },
+      // Customer with both Stores and Private within CY only should also normalize to Stores cleanly
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Stores',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SP2',
+        CustomerName: 'CY Dual Store Private',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 5,
+        Value: 500,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SP2',
+        CustomerName: 'CY Dual Store Private',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 7,
+        Value: 700,
+      },
+      // Non-chain customer whose SubType changed from MOH (PY) to Private Hospital (CY) unifies to Private Hospital
+      {
+        Date: 202507,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Hospital',
+        SubType: 'MOH',
+        Brick: 'Alex 2',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-NC2',
+        CustomerName: 'Converted Hospital',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 12,
+        Value: 1200,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Hospital',
+        SubType: 'Private Hospital',
+        Brick: 'Alex 2',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-NC2',
+        CustomerName: 'Converted Hospital',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 18,
+        Value: 1800,
+      },
+    ]);
+
+    const normMeta = buildMeta(normDs);
+    expect(normMeta.subTypes).toEqual(['Chain', 'Private Hospital', 'Stores']);
+    const res = analyze(normDs, baseQuery({ period: defaultSelection(normMeta.availability) }));
+
+    // Ezzaby, Private, and MOH are all absent from SubType level
+    expect(res.levels.subtype.find((r) => r.value === 'Ezzaby')).toBeUndefined();
+    expect(res.levels.subtype.find((r) => r.value === 'Private')).toBeUndefined();
+    expect(res.levels.subtype.find((r) => r.value === 'MOH')).toBeUndefined();
+
+    const chainSub = res.levels.subtype.find((r) => r.value === 'Chain')!;
+    expect(chainSub.sums).toEqual({ pyQ: 10, pyV: 1000, cyQ: 35, cyV: 3500 });
+    expect(sumRows(res.levels.chain)).toEqual(chainSub.sums);
+
+    const ezzabyChain = res.levels.chain.find((r) => r.value === 'Ezzaby')!;
+    expect(ezzabyChain.sums).toEqual({ pyQ: 10, pyV: 1000, cyQ: 20, cyV: 2000 });
+
+    const seifChain = res.levels.chain.find((r) => r.value === 'Seif PH')!;
+    expect(seifChain.sums).toEqual({ pyQ: 0, pyV: 0, cyQ: 15, cyV: 1500 });
+
+    // Both Stores+Private customers display cleanly as Stores without a Private +1 badge
+    const sp1 = res.levels.customer.find((c) => c.customerId === 'C-SP1')!;
+    const sp2 = res.levels.customer.find((c) => c.customerId === 'C-SP2')!;
+    expect(sp1.subType).toBe('Stores');
+    expect(sp1.subTypeOthers).toEqual([]);
+    expect(sp2.subType).toBe('Stores');
+    expect(sp2.subTypeOthers).toEqual([]);
+
+    const storesSub = res.levels.subtype.find((r) => r.value === 'Stores')!;
+    expect(storesSub.sums).toEqual({ pyQ: 30, pyV: 3000, cyQ: 52, cyV: 5200 });
+
+    // Non-chain customer switching MOH -> Private Hospital unifies to Private Hospital with subTypeOthers=['MOH']
+    const nc2 = res.levels.customer.find((c) => c.customerId === 'C-NC2')!;
+    expect(nc2.subType).toBe('Private Hospital');
+    expect(nc2.subTypeOthers).toEqual(['MOH']);
+    const privHospSub = res.levels.subtype.find((r) => r.value === 'Private Hospital')!;
+    expect(privHospSub.sums).toEqual({ pyQ: 12, pyV: 1200, cyQ: 18, cyV: 1800 });
+
+    // Every SubType row matches Customer level grouped by subType
+    for (const stRow of res.levels.subtype) {
+      const custGroupSum = sumRows(res.levels.customer.filter((c) => c.subType === stRow.value));
+      expect(custGroupSum).toEqual(stRow.sums);
+    }
+
+    // UI level lists exclude distributor
+    expect(DRIVER_LEVELS).toEqual(['subtype', 'chain', 'territory', 'item']);
+    expect(TABLE_LEVELS).toEqual(['subtype', 'chain', 'territory', 'customer']);
   });
 });

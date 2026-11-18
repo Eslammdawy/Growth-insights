@@ -2,7 +2,7 @@
 
 **Last Updated**: 2026-11-18
 **Application**: Sales Growth Analyzer
-**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`30/30`), and production Vite build (`npm run build`) pass with zero errors.
+**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`35/35`), and production Vite build (`npm run build`) pass with zero errors.
 
 ---
 
@@ -139,8 +139,8 @@
 | `src/lib/aggregate.ts` | Single-pass 5-level aggregator (`subtype`, `distributor`, `chain`, `territory`, `customer`), CY item-to-line reallocation, `gross`/`grossTotals`, `customerInsights`, `productExposure`, `insights`, `analyzeItems` | Updated & Verified |
 | `src/lib/hashState.ts` | URL hash serialization (`dlv`, `pel`, `pev`, `ret`, `hmm`), parsing, `DatasetMeta` validation, and `useSyncExternalStore` subscription | Updated & Verified |
 | `src/lib/exportExcel.ts` | Excel (`.xlsx`) export for `LevelTable`, Defector Watchlist (`exportDefectorWatchlistToExcel`), and Product Exposure Matrix (`exportProductExposureToExcel`) | Updated & Verified |
-| `src/lib/acceptance.test.ts` | 25 Vitest acceptance, invariant, Territory×Month, Contribution, PVM, Item reallocation, Chains level, Waterfall, Customer Dynamics, Product Exposure, Customer-Behavior Decomposition & Returns tests | 25/25 Passing |
-| `src/lib/exportExcel.test.ts` | 4 Vitest tests verifying `.xlsx` export headers, row calculations, optional returns columns, and product exposure export | 4/4 Passing |
+| `src/lib/acceptance.test.ts` | 29 Vitest acceptance, invariant, Territory×Month, Contribution, PVM, Item reallocation, Chains level, Waterfall, Customer Dynamics, Product Exposure, Customer-Behavior Decomposition, SubType/Chain normalization & Returns tests | 29/29 Passing |
+| `src/lib/exportExcel.test.ts` | 6 Vitest tests verifying `.xlsx` export headers, row calculations, optional returns columns, all-levels export, and product exposure export | 6/6 Passing |
 | `src/workers/data.worker.ts` | Web Worker hosting dataset, `analyze`, `analyzeItems`, and request cancellation | Verified |
 | `src/workers/workerClient.ts` | Promise RPC wrapper for `data.worker.ts` with abort/cancellation tracking | Verified |
 | `src/store/useDashboardStore.ts` | Zustand store (`driverLevel`, `productExposureLevel`, `productExposureView`, `showReturns`, `heatmapMode`, `customerStatusFilter`, filters, URL hash sync) | Updated & Verified |
@@ -156,10 +156,10 @@
 | `src/components/CyTreemap.tsx` | CY Value Treemap colored by YoY growth from shared palette with click-to-drill & Treemap/Table toggle | Verified |
 | `src/components/CustomerDynamics.tsx` | 4-card retention KPI strip with interactive `KpiInfoTooltip` formula popovers, clickable 5-segment cohort bridge table, and Top-10 Lost Defector Watchlist | Updated & Verified |
 | `src/components/ProductCustomerExposure.tsx` | Product × Customer-Segment Exposure Matrix (`Item` / `Brand` / `Line`) with quick-view chips, proportional segment Δ bars, expandable Customer-Behavior Decomposition waterfall, and `.xlsx` export | New & Verified |
-| `src/components/TableJumpBar.tsx` | Sticky in-page navigation bar (`Filters / Top · Drivers · Insights · SubType · Distributor · Chains · Territory · Customer Dynamics · Customer`) | Updated & Verified |
+| `src/components/TableJumpBar.tsx` | Sticky in-page navigation bar (`Filters / Top · Drivers · SubType · Chains · Territory · Customer Dynamics · Customer`) + 4-level `Export All Levels` | Updated & Verified |
 | `src/components/ErrorBoundary.tsx` | React error boundary component with retry support for charts and tables | Verified |
-| `src/components/LevelTable.tsx` | Virtualized 5-level table (`SubType`, `Distributor`, `Chains`, `Territory`, `Customer`) with `Contrib. %` diverging bars, `.xlsx` export, optional `Returns %` column & flags, and 5-segment customer filter | Updated & Verified |
-| `src/pages/Dashboard.tsx` | Main page layout assembling header, product filters, KPIs, `#section-drivers`, primary charts, `#section-insights`, `#section-customer-dynamics` (`CustomerDynamics` + `ProductCustomerExposure`), and 5 stacked level tables | Updated & Verified |
+| `src/components/LevelTable.tsx` | Virtualized 4-level table (`SubType`, `Chains`, `Territory`, `Customer`) with `Contrib. %` diverging bars, `.xlsx` export, optional `Returns %` column & flags, 5-segment customer filter, and filtered subtotal `<tfoot>` | Updated & Verified |
+| `src/pages/Dashboard.tsx` | Main page layout assembling header, product filters, KPIs, `#section-drivers`, primary charts, `#section-insights`, `#section-customer-dynamics` (`CustomerDynamics` + `ProductCustomerExposure`), and 4 stacked level tables | Updated & Verified |
 
 ### 1.12 Inclusive Product Allocation (Counting All Products Regardless of CY Activity) (2026-11-12)
 - **Universal Product Inclusion (`src/lib/aggregate.ts`)**:
@@ -183,16 +183,48 @@
 - Added `AGENTS.md` (in `app/`, plus a pointer at the workspace root) requiring `README.md` and `worklog.md` to be updated after every project change.
 - README: no changes needed (no user-facing behavior change).
 
+### 1.17 Guide Report SubType Multi-Select & Customer Dynamics SubType Multi-Select (2026-11-18)
+- **SubType options narrowed by product (`src/lib/aggregate.ts`)**: `buildMeta` now emits `itemSubTypes` (unique `[item, subType]` pairs across the whole dataset), and `subTypeOptions(meta, mainTypes, scope?)` accepts an optional `ProductScope` (`lines` / `brands` / `items`) to keep only SubTypes with sales for the selected products. Narrowing is one-way (Line → Brand → Product → SubType).
+- **Store & hash (`src/store/useDashboardStore.ts`, `src/lib/hashState.ts`)**: `setLines` / `setBrands` / `setItems` prune selected `subTypes` that no longer qualify (`pruneSubTypes`); `setMainTypes` and hash validation use the product-scoped options, and hash SubTypes are now validated after Lines/Brands/Items.
+- **Guide Report banner (`src/components/Filters.tsx`)**: Added an emerald **SubType** multi-select group next to the Line → Brand → Product group. It drives the existing global `subTypes` filter (whole dashboard, `subTypes=` hash, Reset filters), shows removable `SubType:` chips, and counts toward the active-filter badge.
+- **Shared component (`src/components/SearchableMultiSelect.tsx`)**: Moved the searchable multi-select out of `Filters.tsx` and added optional `optionCounts`, `placeholderCount`, `ariaLabel`, and a `fuchsia` accent.
+- **Customer Dynamics (`src/components/CustomerDynamics.tsx`)**: Replaced the single-select SubType `<select>` with the shared multi-select (customer counts per SubType). It stays local to the section and matches on the customer's primary SubType; selecting every SubType counts as "All". The notice shows `A, B +N more` with one **Show all SubTypes** reset.
+- **Tests (`src/lib/acceptance.test.ts`)**: Added test 17b covering product-scoped SubType options and the guarantee that no rows match for out-of-scope SubTypes.
+- README: updated the Filtering and Customer Dynamics sections.
+
+### 1.18 SubType/Chain Normalization, Distributor UI Removal & LevelTable Filtered Subtotals (2026-11-18)
+- **Distributor Level Removed from UI (`src/lib/aggregate.ts`, `src/lib/insights.ts`, `src/lib/hashState.ts`, `src/components/TableJumpBar.tsx`, `src/components/GrowthChart.tsx`, `src/components/BubbleScatterChart.tsx`, `src/pages/Dashboard.tsx`)**:
+  - Removed `'distributor'` from `TABLE_LEVELS` (`['subtype', 'chain', 'territory', 'customer']`), `INSIGHT_LEVELS`, `DRIVER_LEVELS` (`['subtype', 'chain', 'territory', 'item']`), `VALID_DRIVER_LEVELS`, and `CHART_LEVELS` (`['subtype', 'chain', 'territory', 'brick', 'customer']`), eliminating the Distributor stacked table, Jump Bar pill, `Export All Levels` tab, and Distributor chart/driver selector options while replacing Distributor with `Chains` in Growth Drivers.
+  - Updated `TableJumpBar.tsx` badge/tooltip from `5 levels` to `4 levels`.
+- **`Ezzaby` & `Chain` Normalization + Latest-Period `SubType` Unification (`src/lib/aggregate.ts`)**:
+  - In `prepare(ds)`, rows with raw `SubType` `'Ezzaby'`/`'Ezaby'` are remapped to `SubType = 'Chain'` and `Chain = 'Ezzaby'`, removing `'Ezzaby'` from `SubType` completely and consolidating all Ezzaby sales under `Chain = 'Ezzaby'`.
+  - Rows with any non-empty named `Chain` (e.g., `SubType = 'Private'` with a populated `Chain`) are remapped to `SubType = 'Chain'`, so `SubType = 'Chain'` and the dedicated `Chains` table reconcile 100%.
+  - Extended `computeCustomers` to return `subTypeOf`, unifying non-chain customers' historical rows to their latest-period `SubType` (matching Brick/Territory behavior) so `#table-subtype` and `CustomerDynamics` local `SubType` totals match 100% across all 20 SubTypes.
+- **`Stores + Private → Stores` Customer Rule (`src/lib/aggregate.ts`)**:
+  - In `prepare(ds)`, any customer with both `Stores` (`Store`) and `Private` across active transactions (in PY, CY, or across years) has all of their `Private` rows normalized to `Stores` before `computeCustomers`, classifying them as `Stores` without a `+1 (Private)` badge on the Customer table.
+- **`LevelTable` Filtered Subtotal Footer (`src/components/LevelTable.tsx`)**:
+  - Updated `tableTotals` and `tableGrossTotals` to sum `topRows` when a table-local `Search`, `Status`, or `Top/Bottom N` filter is active, displaying `Filtered Subtotal (X of Y ...)` in `<tfoot>`.
+- **Tests (`src/lib/acceptance.test.ts`, `src/lib/exportExcel.test.ts`)**:
+  - Updated existing assertions for 4 `TABLE_LEVELS` and `Ezzaby` removal from `SubType`; added test 28 verifying `Ezzaby → Chain(Ezzaby)`, named `Chain → SubType=Chain`, and latest-period `SubType` unification across `levels.subtype`, `levels.chain`, and `levels.customer`.
+- README: updated stacked tables, Jump Bar, Growth Drivers, normalization/attribution definitions, and test count.
+
+### 1.19 Guide Report Distributor Multi-Select Filter (2026-11-18)
+- **Distributor options narrowed by product (`src/lib/aggregate.ts`)**: Replaced `itemSubTypes` in `DatasetMeta` / `buildMeta` with `itemDistributors` (unique `[item, distributor]` pairs across the whole dataset excluding `EXCLUDED_DISTRIBUTORS`), restored `subTypeOptions(meta, mainTypes)` to cascade solely from `mainTypes`, and added `distributorOptions(meta, scope?)` to narrow Distributors one-way by the selected `Line` / `Brand` / `Product` (`ProductScope`).
+- **Store & URL hash pruning (`src/store/useDashboardStore.ts`, `src/lib/hashState.ts`)**: Replaced `pruneSubTypes` with `pruneDistributors` so `setLines`, `setBrands`, and `setItems` drop selected `distributors` that no longer have sales for the active product scope; updated `validateHashAgainstMeta` to validate `distributors=` against product-scoped `distributorOptions` after `lines`/`brands`/`items`, and restored `setMainTypes` and hash `subTypes=` validation to `subTypeOptions(meta, mainTypes)`.
+- **Guide Report banner (`src/components/Filters.tsx`)**: Replaced the emerald **SubType** multi-select group and `SubType:` chips with **Distributor** (`All Distributors`, `Distributor:` removable chips, `activeFilterCount` including `distributors.length`), wiring it to the global `distributors` filter while leaving the local **SubType** multi-select in `src/components/CustomerDynamics.tsx` and shared `src/components/SearchableMultiSelect.tsx` unchanged.
+- **Tests (`src/lib/acceptance.test.ts`)**: Updated test `17b` to verify `itemDistributors`, product-scoped `distributorOptions`, and `matchedRows === 0` for out-of-scope Distributors.
+- README: updated the Guide Report filter description in `README.md` to document the **Distributor** multi-select (`distributors=`, `distributorOptions`, `meta.itemDistributors`).
+
 ---
 
 ## 3. Verification Results & Bundle Size Deltas
 
 - **TypeScript Check (`npm run typecheck`)**: Passed (`0` errors).
-- **Automated Tests (`npm test`)**: Passed (`30/30` tests across `src/lib/acceptance.test.ts` (26 tests) and `src/lib/exportExcel.test.ts` (4 tests)).
-- **Production Build (`npm run build`)**: Passed cleanly in `6.17s` with zero new runtime dependencies. Lazy-loaded chunk sizes:
-  - `GrowthDrivers-*.js`: `22.40 kB` (`6.74 kB` gzip)
-  - `CustomerDynamics-*.js`: `24.84 kB` (`6.30 kB` gzip)
+- **Automated Tests (`npm test`)**: Passed (`35/35` tests across `src/lib/acceptance.test.ts` (29 tests) and `src/lib/exportExcel.test.ts` (6 tests)).
+- **Production Build (`npm run build`)**: Passed cleanly in `5.59s` with zero new runtime dependencies. Lazy-loaded chunk sizes:
+  - `GrowthDrivers-*.js`: `22.40 kB` (`6.75 kB` gzip)
+  - `CustomerDynamics-*.js`: `23.96 kB` (`6.21 kB` gzip)
   - `ProductCustomerExposure-*.js`: `28.26 kB` (`7.51 kB` gzip)
   - `KpiInfoTooltip-*.js`: `2.52 kB` (`1.11 kB` gzip)
   - `MonthChart-*.js`: `43.25 kB` (`10.89 kB` gzip)
-  - `data.worker-*.js`: `41.13 kB`
+  - `data.worker-*.js`: `44.85 kB`

@@ -13,7 +13,7 @@ import {
   ZAxis,
 } from 'recharts';
 import { useShallow } from 'zustand/react/shallow';
-import { DrillField, LEVELS, LEVEL_LABEL, Level } from '../lib/aggregate';
+import { CHART_LEVELS, DrillField, LEVEL_LABEL, Level } from '../lib/aggregate';
 import { fmtCompact, fmtGrowth, fmtMetric, fmtPct, fmtSigned } from '../lib/format';
 import { Growth, GrowthStatus, METRIC_LABEL, deriveRow } from '../lib/metrics';
 import { STATUS_LABEL, statusColor } from '../lib/palette';
@@ -163,7 +163,7 @@ export const BubbleScatterChart: React.FC = () => {
             aria-label="Bubble scatter level selection"
             className="rounded-lg border border-indigo-200/80 bg-white/85 px-2.5 py-0.5 text-xs font-bold text-indigo-900 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-indigo-200"
           >
-            {LEVELS.map((lvl) => (
+            {CHART_LEVELS.map((lvl) => (
               <option key={lvl} value={lvl} className="bg-white dark:bg-slate-900">
                 {LEVEL_LABEL[lvl]}
               </option>

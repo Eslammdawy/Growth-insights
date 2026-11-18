@@ -1,11 +1,11 @@
-import { DatasetMeta, DrillChip, InsightLevel, brandOptions, itemOptions, subTypeOptions } from './aggregate';
+import { DatasetMeta, DrillChip, InsightLevel, brandOptions, distributorOptions, itemOptions, subTypeOptions } from './aggregate';
 import { METRICS, Metric, PRODUCT_EXPOSURE_LEVELS, ProductExposureLevel } from './metrics';
 import { PeriodSelection, quarterMonths } from './periods';
 
 export type HeatmapMode = 'yoy' | 'pp';
 export type ProductExposureView = 'all' | 'churn' | 'new';
 export const PRODUCT_EXPOSURE_VIEWS: readonly ProductExposureView[] = ['all', 'churn', 'new'];
-const VALID_DRIVER_LEVELS: readonly InsightLevel[] = ['subtype', 'distributor', 'territory', 'item'];
+const VALID_DRIVER_LEVELS: readonly InsightLevel[] = ['subtype', 'chain', 'territory', 'item'];
 
 export interface ParsedHashState {
   metric?: Metric;
@@ -241,10 +241,6 @@ export function validateHashAgainstMeta(
     ? parsed.subTypes.filter((s) => availableSubTypes.includes(s))
     : [];
 
-  const distributors = parsed.distributors
-    ? parsed.distributors.filter((d) => meta.distributors.includes(d))
-    : [];
-
   const territories = parsed.territories
     ? parsed.territories.filter((t) => meta.territories.includes(t))
     : [];
@@ -261,6 +257,11 @@ export function validateHashAgainstMeta(
   const availableItems = itemOptions(meta, lines, brands);
   const items = parsed.items
     ? parsed.items.filter((it) => availableItems.includes(it))
+    : [];
+
+  const availableDistributors = distributorOptions(meta, { lines, brands, items });
+  const distributors = parsed.distributors
+    ? parsed.distributors.filter((d) => availableDistributors.includes(d))
     : [];
 
   const validDrillFields = new Set(['SubType', 'Chain', 'Distributor', 'Territory', 'Brick', 'Customer', 'CustomerID', 'Item']);

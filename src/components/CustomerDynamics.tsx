@@ -33,6 +33,7 @@ import {
 } from '../lib/metrics';
 import { StatusFilter, useDashboardStore } from '../store/useDashboardStore';
 import { KpiInfoTooltip } from './KpiInfoTooltip';
+import { SearchableMultiSelect } from './SearchableMultiSelect';
 
 const SEGMENT_BADGE: Record<CustomerSegment, string> = {
   new: 'bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-300',
@@ -48,7 +49,7 @@ const SEGMENT_BADGE: Record<CustomerSegment, string> = {
 export const CustomerDynamics: React.FC = () => {
   const [, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
-  const [selectedSubType, setSelectedSubType] = useState<string>('all');
+  const [selectedSubTypes, setSelectedSubTypes] = useState<string[]>([]);
   const [expandedDefectors, setExpandedDefectors] = useState<Set<string>>(() => new Set());
   const targets = useRef(new Map<string, ItemTarget>());
 
@@ -115,46 +116,63 @@ export const CustomerDynamics: React.FC = () => {
 
   const customerRows = result?.levels.customer ?? [];
 
-  const subTypeOptions = useMemo(() => {
-    const counts = new Map<string, number>();
+  /** Customer counts per primary SubType (respects the global filters already applied to the result). */
+  const subTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
     for (const r of customerRows) {
       const st = r.subType || 'Unassigned';
-      counts.set(st, (counts.get(st) ?? 0) + 1);
+      counts[st] = (counts[st] ?? 0) + 1;
     }
-    return Array.from(counts.entries())
-      .map(([value, count]) => ({ value, label: value, count }))
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    return counts;
   }, [customerRows]);
 
-  // Reset selectedSubType if it is no longer valid
+  const subTypeOptions = useMemo(
+    () =>
+      Object.keys(subTypeCounts).sort(
+        (a, b) => subTypeCounts[b] - subTypeCounts[a] || a.localeCompare(b)
+      ),
+    [subTypeCounts]
+  );
+
+  // Drop selected SubTypes that are no longer available
   useEffect(() => {
-    if (selectedSubType !== 'all' && !subTypeOptions.some((o) => o.value === selectedSubType)) {
-      setSelectedSubType('all');
-    }
-  }, [subTypeOptions, selectedSubType]);
+    if (selectedSubTypes.length === 0) return;
+    const valid = selectedSubTypes.filter((s) => subTypeCounts[s] !== undefined);
+    if (valid.length !== selectedSubTypes.length) setSelectedSubTypes(valid);
+  }, [subTypeCounts, selectedSubTypes]);
+
+  /** True when the local SubType filter actually narrows the customer list. */
+  const subTypeFilterActive =
+    selectedSubTypes.length > 0 && selectedSubTypes.length < subTypeOptions.length;
 
   const filteredCustomerRows = useMemo(() => {
-    if (selectedSubType === 'all') return customerRows;
-    return customerRows.filter((r) => (r.subType || 'Unassigned') === selectedSubType);
-  }, [customerRows, selectedSubType]);
+    if (!subTypeFilterActive) return customerRows;
+    const sel = new Set(selectedSubTypes);
+    return customerRows.filter((r) => sel.has(r.subType || 'Unassigned'));
+  }, [customerRows, selectedSubTypes, subTypeFilterActive]);
 
   const ci = useMemo(() => {
     if (!result) return null;
-    if (selectedSubType === 'all') {
+    if (!subTypeFilterActive) {
       return result.customerInsights.byMetric[metric];
     }
     return computeCustomerInsightsForMetric(filteredCustomerRows, metric);
-  }, [result, selectedSubType, filteredCustomerRows, metric]);
+  }, [result, subTypeFilterActive, filteredCustomerRows, metric]);
 
   const effectiveTotalPy = useMemo(() => {
-    if (selectedSubType === 'all') {
+    if (!subTypeFilterActive) {
       return result ? (metric === 'units' ? result.totals.pyQ : result.totals.pyV) : 0;
     }
     return filteredCustomerRows.reduce((sum, r) => {
       const { py } = metricPair(r.sums, metric);
       return sum + py;
     }, 0);
-  }, [result, selectedSubType, filteredCustomerRows, metric]);
+  }, [result, subTypeFilterActive, filteredCustomerRows, metric]);
+
+  const subTypeSummary = useMemo(() => {
+    if (selectedSubTypes.length <= 2) return selectedSubTypes.join(', ');
+    return `${selectedSubTypes.slice(0, 2).join(', ')} +${selectedSubTypes.length - 2} more`;
+  }, [selectedSubTypes]);
 
   const defectors = useMemo(() => {
     if (!result) return [];
@@ -240,43 +258,21 @@ export const CustomerDynamics: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* SubType Filter */}
-          <div className="flex items-center gap-1.5 rounded-xl border border-fuchsia-200/80 bg-white/80 px-2.5 py-1 shadow-sm dark:border-slate-700/80 dark:bg-slate-900/80">
+          {/* SubType Filter (local multi-select, matches each customer's primary SubType) */}
+          <div className="flex items-center gap-1.5">
             <Filter className="h-3.5 w-3.5 text-fuchsia-600 dark:text-fuchsia-400 shrink-0" />
-            <label htmlFor="customer-subtype-select" className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-              SubType:
-            </label>
-            <select
-              id="customer-subtype-select"
-              value={selectedSubType}
-              onChange={(e) => setSelectedSubType(e.target.value)}
-              aria-label="Filter customer dynamics by SubType"
-              className="rounded-lg border-0 bg-transparent py-0 pl-1 pr-6 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-fuchsia-500 dark:text-slate-100"
-            >
-              <option value="all" className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100">
-                All SubTypes ({customerRows.length.toLocaleString('en-US')})
-              </option>
-              {subTypeOptions.map((st) => (
-                <option
-                  key={st.value}
-                  value={st.value}
-                  className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100"
-                >
-                  {st.label} ({st.count.toLocaleString('en-US')})
-                </option>
-              ))}
-            </select>
-            {selectedSubType !== 'all' && (
-              <button
-                type="button"
-                onClick={() => setSelectedSubType('all')}
-                title="Reset SubType filter to All"
-                aria-label="Reset SubType filter"
-                className="rounded p-0.5 text-slate-400 hover:bg-fuchsia-500/20 hover:text-fuchsia-700 dark:hover:text-fuchsia-300"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
+            <SearchableMultiSelect
+              label="SubType"
+              scopeBadge="Customer Dynamics"
+              options={subTypeOptions}
+              selected={selectedSubTypes}
+              onChange={setSelectedSubTypes}
+              placeholder="All SubTypes"
+              placeholderCount={customerRows.length}
+              optionCounts={subTypeCounts}
+              accent="fuchsia"
+              ariaLabel="Filter customer dynamics by SubType"
+            />
           </div>
 
           {customerStatusFilter !== 'all' && (
@@ -299,19 +295,22 @@ export const CustomerDynamics: React.FC = () => {
       </div>
 
       <p className="sr-only">
-        Customer dynamics for {METRIC_LABEL[metric]}{selectedSubType !== 'all' ? ` (SubType: ${selectedSubType})` : ''}: Active customers PY {ci.active.pyCount} to CY {ci.active.cyCount}.
+        Customer dynamics for {METRIC_LABEL[metric]}{subTypeFilterActive ? ` (SubType: ${selectedSubTypes.join(', ')})` : ''}: Active customers PY {ci.active.pyCount} to CY {ci.active.cyCount}.
         Retained Growth Share {fmtPct(ci.retainedGrowthShare, true)}, New Customer Growth Share {fmtPct(ci.newGrowthShare, true)}.
       </p>
 
       {open && (
         <div id="customer-dynamics-body" className="space-y-3.5 p-3.5">
           {/* Active SubType filter notice banner */}
-          {selectedSubType !== 'all' && (
+          {subTypeFilterActive && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-fuchsia-200/80 bg-fuchsia-50/70 px-3 py-1.5 text-xs text-fuchsia-950 dark:border-fuchsia-900/50 dark:bg-fuchsia-950/30 dark:text-fuchsia-200">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-semibold text-slate-600 dark:text-slate-400">Filtered by SubType:</span>
-                <span className="rounded-lg bg-fuchsia-500/15 px-2 py-0.5 font-extrabold text-fuchsia-700 dark:text-fuchsia-300">
-                  {selectedSubType}
+                <span
+                  className="rounded-lg bg-fuchsia-500/15 px-2 py-0.5 font-extrabold text-fuchsia-700 dark:text-fuchsia-300"
+                  title={selectedSubTypes.join(', ')}
+                >
+                  {subTypeSummary}
                 </span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                   ({filteredCustomerRows.length.toLocaleString('en-US')} customers · {ci.active.cyCount.toLocaleString('en-US')} active in CY)
@@ -319,7 +318,7 @@ export const CustomerDynamics: React.FC = () => {
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedSubType('all')}
+                onClick={() => setSelectedSubTypes([])}
                 className="inline-flex items-center gap-1 text-xs font-bold text-fuchsia-700 hover:underline dark:text-fuchsia-300"
               >
                 <X className="h-3 w-3" />
@@ -332,12 +331,12 @@ export const CustomerDynamics: React.FC = () => {
             <div className="flex h-44 flex-col items-center justify-center rounded-xl border border-slate-200/70 p-6 text-center dark:border-slate-800/80">
               <Users className="h-7 w-7 text-slate-400 dark:text-slate-500" />
               <p className="mt-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                No customer activity matches the current filters{selectedSubType !== 'all' ? ` for SubType "${selectedSubType}"` : ''}.
+                No customer activity matches the current filters{subTypeFilterActive ? ` for SubType "${subTypeSummary}"` : ''}.
               </p>
-              {selectedSubType !== 'all' ? (
+              {subTypeFilterActive ? (
                 <button
                   type="button"
-                  onClick={() => setSelectedSubType('all')}
+                  onClick={() => setSelectedSubTypes([])}
                   className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-fuchsia-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-fuchsia-500"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />

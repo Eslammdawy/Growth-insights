@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts';
 import { useShallow } from 'zustand/react/shallow';
-import { LEVELS, LEVEL_LABEL, Level } from '../lib/aggregate';
+import { CHART_LEVELS, LEVEL_LABEL, Level } from '../lib/aggregate';
 import { fmtCompact, fmtGrowth, fmtMetric, fmtPct, fmtSigned } from '../lib/format';
 import { METRIC_LABEL, deriveRow } from '../lib/metrics';
 import { SHARED_PALETTE } from '../lib/palette';
@@ -138,7 +138,7 @@ export const GrowthChart: React.FC = () => {
             aria-label="Chart level selection"
             className="rounded-lg border border-indigo-200/80 bg-white/85 px-2.5 py-0.5 text-xs font-bold text-indigo-900 focus:outline-none dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-indigo-200"
           >
-            {LEVELS.map((lvl) => (
+            {CHART_LEVELS.map((lvl) => (
               <option key={lvl} value={lvl} className="bg-white dark:bg-slate-900">
                 {LEVEL_LABEL[lvl]}
               </option>

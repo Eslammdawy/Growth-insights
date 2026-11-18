@@ -139,13 +139,13 @@ export const TableJumpBar: React.FC = () => {
       </div>
       <div className="flex shrink-0 items-center gap-2 pl-2">
         <span className="hidden rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 md:inline">
-          5 levels stacked
+          4 levels stacked
         </span>
         <button
           type="button"
           onClick={() => void handleExportAllLevels()}
           disabled={exporting || analyzing || !result}
-          title="Export all 5 levels (each in a separate Excel tab) with per-product breakdown"
+          title="Export all 4 levels (each in a separate Excel tab) with per-product breakdown"
           aria-label="Export all levels to Excel"
           className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-gradient-to-r from-emerald-500/15 to-teal-500/15 px-3 py-1 text-xs font-bold text-emerald-800 shadow-sm transition-all hover:from-emerald-500/25 hover:to-teal-500/25 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:text-emerald-300"
         >

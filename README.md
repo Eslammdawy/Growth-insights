@@ -11,7 +11,7 @@ The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xls
    - Dictionary-encodes string columns (`dict` + `Int32Array` codes) and stores numeric columns (`Date`, `Quantity`, `Value`) as `Float64Array`, writing `public/data/sales.json.gz` (~11 MB, git-ignored).
 2. **In-Browser Web Worker (`src/workers/data.worker.ts`)**:
    - Automatically fetches `./data/sales.json.gz` on startup, decompresses via `DecompressionStream` (with `fflate` fallback), and builds typed-array indexes in memory.
-   - **Single-Pass Multi-Level Aggregation (`src/lib/aggregate.ts`)**: computes net and gross totals, monthly trends, Territory × Month matrix, 5 analysis table levels (`SubType`, `Distributor`, `Chains`, `Territory`, `Customer`), Customer Dynamics cohorts/retention, and Contribution-to-Growth & Price/Volume/Mix decomposition simultaneously in a single typed-array pass (~15–20 ms across 494k rows).
+   - **Single-Pass Multi-Level Aggregation (`src/lib/aggregate.ts`)**: computes net and gross totals, monthly trends, Territory × Month matrix, 4 dashboard table levels (`SubType`, `Chains`, `Territory`, `Customer`), Customer Dynamics cohorts/retention, and Contribution-to-Growth & Price/Volume/Mix decomposition simultaneously in a single typed-array pass (~15–20 ms across 494k rows).
    - **Superseded Request Cancellation**: Aborts superseded analysis requests on rapid filter changes, skipping worker execution and discarding outdated calculations.
    - **On-Demand Item Breakdown (`analyzeItems`)**: lazily computes per-item breakdowns (including gross sales and returns) inside the Web Worker whenever any table row, `Chain` child row, or Defector Watchlist row is expanded.
 
@@ -69,8 +69,9 @@ The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xls
 
 ## Filtering & Cross-Filtering
 
-- **Product Filters Bar (`src/components/Filters.tsx`)**:
-  - Streamlined 2-step cascading product filter bar (**1. Brand** → **2. Item**) with searchable multi-select dropdowns and a quick reset trigger. Selecting one or more Brands dynamically scopes the available Items.
+- **Guide Report Filters Bar (`src/components/Filters.tsx`)**:
+  - Cascading product filter group (**Line** → **Brand** → **Product**) with searchable multi-select dropdowns (shared `src/components/SearchableMultiSelect.tsx`), removable summary chips, and a quick reset trigger. Selecting Lines scopes Brands; selecting Brands scopes Products.
+  - Separate **Distributor** multi-select group next to the product group. It filters the whole dashboard at transaction level (global `distributors` state, persisted in the `distributors=` URL hash and cleared by **Reset filters**). Its options exclude `EXCLUDED_DISTRIBUTORS` and are narrowed one-way by the Line / Brand / Product selection to Distributors with sales for those products anywhere in the dataset (`distributorOptions(meta, { lines, brands, items })`, backed by `meta.itemDistributors`); selected Distributors that no longer qualify are dropped automatically when the product selection changes.
 - **Interactive Cross-Filter Chips (`src/components/DrillChips.tsx`)**:
   - Clicking bars, bubbles, treemap tiles, Growth Drivers rows, Defector Watchlist customers, or table filter buttons adds global cross-filter chips across `SubType`, `Chain`, `Distributor`, `Territory`, `Brick`, `Customer`, and `Item`.
 
@@ -80,16 +81,17 @@ Every visual on the dashboard includes: (1) an `sr-only` text summary alternativ
 
 1. **Growth Drivers — Contribution Bridge & Narrative (`src/components/GrowthDrivers.tsx`, `#section-drivers`)**:
    - Deterministic plain-English headline banner (`buildHeadline`) covering 6 portfolio edge cases, accompanied by concentration chips (`Top 5` share of gains & `Top 1` detractor share of decline), a single-entity dominance warning badge (`>50%` of positive growth), and a portfolio Returns Rate chip (`Returns rate %` vs `PY %`, highlighted when elevated `> 1.25×` PY).
-   - Interactive horizontal contribution waterfall (`buildWaterfall`) bridging `PY` → Top positive drivers → Top negative detractors → `Other growth / decline` → `CY` across `SubType`, `Distributor`, `Territory`, or `Item`, alongside clickable Top-5 Contributors and Top-5 Detractors strips.
+   - Interactive horizontal contribution waterfall (`buildWaterfall`) bridging `PY` → Top positive drivers → Top negative detractors → `Other growth / decline` → `CY` across `SubType`, `Chains`, `Territory`, or `Item`, alongside clickable Top-5 Contributors and Top-5 Detractors strips.
 2. **Upgraded Monthly PY vs CY & YoY % (`src/components/MonthChart.tsx`)**:
    - Recharts `ComposedChart` pairing `PY` and `CY` bars (with compact outside-end labels) on the primary left Y-axis with a `YoY Growth %` line overlay on a secondary right Y-axis.
 3. **Top-10 Growth Leaders / Decliners (`src/components/GrowthChart.tsx`)**:
-   - Horizontal bar chart of top entities by `YoY Δ` or `YoY %` across any selectable level, with outside-end `YoY %` labels colored by the shared Okabe-Ito palette (`src/lib/palette.ts`).
+   - Horizontal bar chart of top entities by `YoY Δ` or `YoY %` across any selectable level (`SubType`, `Chains`, `Territory`, `Brick`, `Customer`), with outside-end `YoY %` labels colored by the shared Okabe-Ito palette (`src/lib/palette.ts`).
 4. **Bubble Scatter (`src/components/BubbleScatterChart.tsx`)**:
-   - Plots `x = PY`, `y = YoY %`, `size = CY`, and `color = status` (`Growing`, `Declining`, `New`, `Lost`, `Flat`) across `SubType`, `Distributor`, `Territory`, or `Brick`. Clicking any bubble adds a cross-filter drill chip.
+   - Plots `x = PY`, `y = YoY %`, `size = CY`, and `color = status` (`Growing`, `Declining`, `New`, `Lost`, `Flat`) across `SubType`, `Chains`, `Territory`, `Brick`, or `Customer`. Clicking any bubble adds a cross-filter drill chip.
 5. **CY Value Treemap Colored by Growth (`src/components/CyTreemap.tsx`)**:
    - Recharts `Treemap` where tile area is proportional to `CY Value` and tile fill reflects `YoY Value Growth %` via `treemapFillColor` from the shared palette (`src/lib/palette.ts`). Clicking any tile adds a drill chip.
 6. **Customer Dynamics — Retention, Cohort Bridge, Defector Watchlist & Product × Customer-Segment Exposure (`src/components/CustomerDynamics.tsx`, `src/components/ProductCustomerExposure.tsx`, `#section-customer-dynamics`)**:
+   - **Local SubType Multi-Select**: A searchable multi-select (with customer counts per SubType) in the section header narrows Customer Dynamics only, matching each customer's **primary** SubType. Its options come from the customers already shown, so they respect the global Guide Report filters. When several SubTypes are selected, a `Filtered by SubType: A, B +N more` notice offers a single **Show all SubTypes** reset.
    - **4-Card Retention KPI Strip**: `Active Customers`, `Avg / Active (Value / Units)`, `Retained Growth Share`, and `New Customer Growth Share`. Every card includes an interactive **`KpiInfoTooltip`** (`i` icon popover) explaining its plain-English business meaning and exact calculation formula.
    - **Clickable 5-Segment Lifecycle Table**: Breaks down `New`, `Growing (>+5%)`, `Stable (±5%)`, `Declining (<-5%)`, and `Lost` customer cohorts with `PY`, `CY`, `YoY Δ`, `YoY %`, and `Contrib. %`. Clicking any row filters the Customer table below and smooth-scrolls to `#table-customer`.
    - **Top-10 Lost Customers Defector Watchlist**: Ranks the largest lost accounts by `PY Lost` and `Contrib. %`, supports inline expansion to inspect the exact items each defector bought in PY, one-click customer drill filtering, and `.xlsx` export (`Export watchlist` via `exportDefectorWatchlistToExcel`).
@@ -97,18 +99,17 @@ Every visual on the dashboard includes: (1) an `sr-only` text summary alternativ
 
 ## Multi-Level Stacked Tables, Item Drill-Down & Excel Export
 
-Five dedicated stacked tables are rendered on the main dashboard page (`src/components/LevelTable.tsx`, `TABLE_LEVELS = ['subtype', 'distributor', 'chain', 'territory', 'customer']`):
+Four dedicated stacked tables are rendered on the main dashboard page (`src/components/LevelTable.tsx`, `TABLE_LEVELS = ['subtype', 'chain', 'territory', 'customer']`):
 
 1. **SubType Level (`subtype`)**:
    - Click any `SubType` row to expand its **Item** breakdown inline.
    - For the `Chain` row (`EXPANDABLE_SUBTYPES = ['Chain']`), click the **`N chains`** pill to expand the per-`Chain` breakdown inline; click any `Chain` child row to expand that chain's **Item** breakdown (3-level hierarchy: `SubType → Chain → Item`).
-2. **Distributor Level (`distributor`)**: Excludes `Ezaby` / `Ezzaby` (which is already represented under the `SubType` level table); click any distributor row to expand its **Item** breakdown.
-3. **Chains Level (`chain`)**: Dedicated table listing all named pharmacy chains directly (excluding blank and unassigned chain rows); click any chain row to expand its **Item** breakdown.
-4. **Territory Level (`territory`)**: Click any territory row to expand its **Item** breakdown.
-5. **Customer Level (`customer`)**: Shows `Customer Name`, `Brick (CY)`, and `SubType` (`+N` badges for historical values); click any customer row to expand its **Item** breakdown.
+2. **Chains Level (`chain`)**: Dedicated table listing all named pharmacy chains directly (excluding blank and unassigned chain rows, and matching `SubType = Chain` 100%); click any chain row to expand its **Item** breakdown.
+3. **Territory Level (`territory`)**: Click any territory row to expand its **Item** breakdown.
+4. **Customer Level (`customer`)**: Shows `Customer Name`, `Brick (CY)`, and `SubType` (`+N` badges for historical values); click any customer row to expand its **Item** breakdown.
 
 Each level table includes:
-- **Export to Excel (`src/lib/exportExcel.ts`)**: One-click `.xlsx` export button in the table header (accessible even when collapsed) that exports visible rows, any expanded `Chain` and `Item` child rows, formatted numbers/percentages, `Contrib. %`, optional `CY Gross` / `CY Returns` / `Returns %` columns, and the summary Total row.
+- **Export to Excel (`src/lib/exportExcel.ts`)**: One-click `.xlsx` export button in the table header (accessible even when collapsed) that exports visible rows, any expanded `Chain` and `Item` child rows, formatted numbers/percentages, `Contrib. %`, and optional `CY Gross` / `CY Returns` / `Returns %` columns (`Export All Levels` in the Jump Bar exports all 4 stacked levels as separate tabs).
 - **Keyboard accessibility**: real `<button aria-expanded aria-controls>` chevron toggle, `aria-sort` on sortable headers, and `aria-rowcount`/`aria-rowindex`.
 - **Search with `useDeferredValue`**: instant typing responsiveness without blocking table filtering.
 - **Growth status filter** (`All`, `Growing`, `Declining`, `New`, `Lost`, plus `Stable (±5%)` on the Customer table).
@@ -116,11 +117,11 @@ Each level table includes:
 - **Top / Bottom N** filter and **Section collapse toggle**.
 - **Memoized virtualized scrolling** (`@tanstack/react-virtual` + `React.memo` row component).
 - **Row-level cross-filter button** adding global drill-down chips.
-- **Pinned Totals footer** with `Contrib. %` and `Returns %` reconciliation.
+- **Pinned Totals / Filtered Subtotal footer** with `Contrib. %` and `Returns %` reconciliation (automatically switches to `Filtered Subtotal` over visible rows whenever Search, Status, or Top/Bottom N is active).
 
 ## Sticky In-Page Navigation
 
-- **Table Jump Bar (`src/components/TableJumpBar.tsx`)**: A sticky jump bar (`Filters / Top · Drivers · Insights · SubType · Distributor · Chains · Territory · Customer Dynamics · Customer`) enables one-click smooth scrolling directly to any analytical section or level table (`Visual insights + 5 levels stacked`).
+- **Table Jump Bar (`src/components/TableJumpBar.tsx`)**: A sticky jump bar (`Filters / Top · Drivers · SubType · Chains · Territory · Customer Dynamics · Customer`) enables one-click smooth scrolling directly to any analytical section or level table (`4 levels stacked`) and one-click `Export All Levels`.
 
 ## Performance & State Architecture
 
@@ -134,10 +135,14 @@ Each level table includes:
    - Okabe-Ito inspired `up` (`#0072B2`) and `down` (`#D55E00`) palette defined centrally in `tailwind.config.js` and exposed via CSS variables (`--color-up`, `--color-up-light`, `--color-up-vivid`, `--color-down`, `--color-down-light`, `--color-down-vivid`).
    - Shared helper functions in `src/lib/palette.ts` drive consistent status colors, diverging contribution bars, and treemap tile fills across light and dark modes.
 
-## Customer Identity & CY Brick / Territory Attribution
+## Customer Identity, SubType/Chain Normalization & CY Brick / Territory Attribution
 
 - **Unified Customer Identity**: Customers are keyed jointly by `CustomerID + CustomerName` so that a customer with the same ID and Name in PY and CY is always treated as **one single customer** even if their brick changed between PY and CY.
-- **Updated True Brick (CY)**: Each customer's `Brick` and `Territory` from their most recent sales period (CY first) are treated as the **updated true Brick and Territory**. All historical (PY) and current (CY) transactions for that customer are attributed to their CY Brick and CY Territory so that comparisons remain strictly like-for-like. Prior bricks are preserved in the `+N` tooltip badge on the Customer table.
+- **SubType & Chain Normalization**:
+  - Rows with `SubType = 'Ezzaby'` / `'Ezaby'` are normalized to `SubType = 'Chain'` and `Chain = 'Ezzaby'`, removing `'Ezzaby'` from `SubType` altogether and consolidating all Ezzaby sales under `Chain = 'Ezzaby'`.
+  - Any row with a non-empty named `Chain` is normalized to `SubType = 'Chain'`, guaranteeing that `SubType = 'Chain'` and the `Chains` table reconcile 100%.
+  - Any customer having both `Stores` and `Private` across their transactions (in PY or CY) is normalized to `SubType = 'Stores'` across all rows.
+- **Updated True Brick, Territory & SubType (CY)**: Each customer's `Brick`, `Territory`, and (for non-chain customers) `SubType` from their most recent sales period (CY first) are treated as their updated true attributes across all historical (PY) and current (CY) transactions, ensuring like-for-like comparisons and 100% reconciliation between the `SubType` table and `Customer Dynamics`. Prior bricks and prior subtypes are preserved in the `+N` tooltip badges on the Customer table.
 
 ## Changing `EXPANDABLE_SUBTYPES`
 
@@ -155,7 +160,7 @@ Any row under an expandable `SubType` whose `Chain` is empty/null is grouped int
 npm install          # Install dependencies
 npm run convert      # Stream-convert ../HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xlsx -> public/data/sales.json.gz
 npm run dev          # Start Vite dev server
-npm run test         # Run Vitest acceptance & export test suite (29 tests across 2 files)
+npm run test         # Run Vitest acceptance & export test suite (35 tests across 2 files)
 npm run typecheck    # Run TypeScript compiler check (tsc --noEmit)
 npm run build        # Typecheck and build production bundle to dist/
 ```

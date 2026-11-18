@@ -308,7 +308,7 @@ describe('exportLevelTableToExcel', () => {
     }
   });
 
-  it('exports all 5 dashboard levels in separate tabs as flat level × item tables, side-by-side Units & EGP, and optional Returns', () => {
+  it('exports all 4 dashboard levels in separate tabs as flat level × item tables, side-by-side Units & EGP, and optional Returns', () => {
     const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
     try {
       const makeRow = (
@@ -424,20 +424,18 @@ describe('exportLevelTableToExcel', () => {
         showReturns: false,
       });
 
-      const calls = appendSheetSpy.mock.calls.slice(-5);
+      const calls = appendSheetSpy.mock.calls.slice(-4);
       expect(calls.map((c) => c[2])).toEqual([
         'SubType Level',
-        'Distributor Level',
         'Chains Level',
         'Territory Level',
         'Customer Level',
       ]);
-      // All 5 sheets belong to the same workbook instance
+      // All 4 sheets belong to the same workbook instance
       const wbRef = calls[0][0];
       for (const c of calls) expect(c[0]).toBe(wbRef);
 
-      // SubType sheet verification: parent + 2 items sorted by EGP delta desc (Item A +4000 tie-break before Item B +4000) + Total
-      // SubType sheet: flat rows only (SubType | Item | Brand), items sorted by EGP Î” desc with label tie-break, no parent / Total rows
+      // SubType sheet: flat rows only (SubType | Item | Brand), items sorted by EGP Δ desc with label tie-break, no parent / Total rows
       const subData = XLSX.utils.sheet_to_json(calls[0][1], { header: 1 }) as (string | number)[][];
       expect(subData[0]).toEqual([
         'SubType',
@@ -471,16 +469,16 @@ describe('exportLevelTableToExcel', () => {
       expect(subData[2].slice(0, 3)).toEqual(['Private', 'Item B', 'Brand B']);
 
       // Chains sheet header
-      const chainData = XLSX.utils.sheet_to_json(calls[2][1], { header: 1 }) as (string | number)[][];
+      const chainData = XLSX.utils.sheet_to_json(calls[1][1], { header: 1 }) as (string | number)[][];
       expect(chainData[0].slice(0, 3)).toEqual(['Chains', 'Item', 'Brand']);
       expect(chainData[1].slice(0, 3)).toEqual(['Seif', 'Item A', 'Brand A']);
 
       // Customer sheet: customer columns repeated on the item row
-      const custData = XLSX.utils.sheet_to_json(calls[4][1], { header: 1 }) as (string | number)[][];
+      const custData = XLSX.utils.sheet_to_json(calls[3][1], { header: 1 }) as (string | number)[][];
       expect(custData[0].slice(0, 6)).toEqual(['Customer ID', 'Customer Name', 'Brick (CY)', 'SubType', 'Item', 'Brand']);
       expect(custData[1].slice(0, 6)).toEqual(['C001', 'Alpha Pharm', 'Downtown', 'Private', 'Item A', 'Brand A']);
       expect(custData).toHaveLength(2);
-      expect(calls[4][1]['!autofilter']).toBeDefined();
+      expect(calls[3][1]['!autofilter']).toBeDefined();
 
       // 2. With showReturns: true
       exportAllLevelsToExcel({
@@ -494,7 +492,7 @@ describe('exportLevelTableToExcel', () => {
         showReturns: true,
       });
 
-      const retCalls = appendSheetSpy.mock.calls.slice(-5);
+      const retCalls = appendSheetSpy.mock.calls.slice(-4);
       const subRetData = XLSX.utils.sheet_to_json(retCalls[0][1], { header: 1 }) as (string | number)[][];
       expect(subRetData[0].slice(13)).toEqual([
         'CY Gross [Units]',
