@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { GroupRow, LEVEL_LABEL, Level, TABLE_LEVELS, sumRows } from './aggregate';
 import {
-  DerivedRow,
   Growth,
   GrowthStatus,
   Metric,
@@ -11,7 +11,6 @@ import {
   Sums,
   contributionPp,
   deriveRow,
-  emptySums,
   metricPair,
   returnsRatePct,
 } from './metrics';
@@ -20,7 +19,7 @@ function formatGrowthCell(g: Growth): number | string {
   if (g.kind === 'pct') return g.value;
   if (g.kind === 'lost') return -1.0;
   if (g.kind === 'new') return 'New';
-  return '–';
+  return 'â€“';
 }
 
 function formatStatusLabel(status: GrowthStatus): string {
@@ -40,7 +39,7 @@ function formatStatusLabel(status: GrowthStatus): string {
 
 function formatContribCell(delta: number, totalPy: number): number | string {
   const raw = contributionPp(delta, totalPy);
-  return raw !== null && Number.isFinite(raw) ? raw : '–';
+  return raw !== null && Number.isFinite(raw) ? raw : 'â€“';
 }
 
 function computeColWidths(headers: string[], dataRows: (string | number)[][]): { wch: number }[] {
@@ -62,32 +61,76 @@ function setCellFormat(ws: XLSX.WorkSheet, r: number, c: number, fmt: string): v
   if (cell && typeof cell.v === 'number') cell.z = fmt;
 }
 
-export interface ExportableRowItem {
-  kind: 'row' | 'chain' | 'item' | 'status';
-  row?: GroupRow;
-  d?: DerivedRow;
-  depth?: number;
-  contribPp?: number | null;
+/** Turns on Excel AutoFilter dropdowns across the header row + all data rows of a sheet. */
+function applyAutoFilter(ws: XLSX.WorkSheet, nCols: number, nDataRows: number): void {
+  if (nCols <= 0) return;
+  ws['!autofilter'] = {
+    ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, nDataRows), c: nCols - 1 } }),
+  };
+}
+
+/**
+ * Flat (database-style) export layout for the level tables: one row per level value Ã— Item,
+ * with the parent's descriptive columns repeated on every row. No parent subtotal rows,
+ * no Total row, no Type column, no indentation, so the sheet can be filtered / pivoted safely.
+ */
+export function flatLevelPrefixHeaders(level: Level, label: string): string[] {
+  if (level === 'customer') return ['Customer ID', 'Customer Name', 'Brick (CY)', 'SubType', 'Item', 'Brand'];
+  if (level === 'brick') return ['Brick', 'Territory', 'Item', 'Brand'];
+  return [label, 'Item', 'Brand'];
+}
+
+function flatParentCells(level: Level, r: GroupRow): (string | number)[] {
+  if (level === 'customer') return [r.customerId ?? '', r.label, r.brick ?? '', r.subType ?? ''];
+  if (level === 'brick') return [r.label, r.territory ?? ''];
+  return [r.label];
+}
+
+/**
+ * Builds the flat data rows for one level. Parents keep the given order; each parent's
+ * items are sorted by YoY Growth (Î”, in `sortMetric`) desc. A parent without any item
+ * breakdown is emitted once with blank Item/Brand so its sales are never dropped.
+ */
+function buildFlatLevelRows(
+  level: Level,
+  parents: GroupRow[],
+  itemsByRow: Record<string, GroupRow[]>,
+  sortMetric: Metric,
+  tail: (row: GroupRow) => (string | number)[],
+): (string | number)[][] {
+  const out: (string | number)[][] = [];
+  for (const p of parents) {
+    const prefix = flatParentCells(level, p);
+    const children = sortRowsByDeltaDesc(itemsByRow[p.id] ?? [], sortMetric);
+    if (children.length === 0) {
+      out.push([...prefix, '', '', ...tail(p)]);
+      continue;
+    }
+    for (const it of children) out.push([...prefix, it.label, it.brand ?? '', ...tail(it)]);
+  }
+  return out;
 }
 
 export interface ExportLevelTableOptions {
   level: Level;
   label: string;
-  rows: ExportableRowItem[];
-  total: DerivedRow;
-  totalCount: number;
+  /** Parent rows in the order shown in the table (already filtered by status / search / Top-N). */
+  rows: GroupRow[];
+  /** Item breakdown per parent row id. */
+  itemsByRow: Record<string, GroupRow[]>;
   period: { pyLabel: string; cyLabel: string };
   metric: Metric;
   portfolioTotals?: Sums;
   showReturns?: boolean;
-  tableGrossTotals?: Sums;
 }
 
 /**
  * Download a SheetJS workbook in the browser environment.
+ * With `freezeHeader`, the top row of every sheet is frozen.
  */
-export function saveWorkbook(wb: XLSX.WorkBook, filename: string): void {
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+export function saveWorkbook(wb: XLSX.WorkBook, filename: string, opts: { freezeHeader?: boolean } = {}): void {
+  let wbout: Uint8Array = new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer);
+  if (opts.freezeHeader) wbout = freezeHeaderRow(wbout);
   if (typeof document === 'undefined' || typeof window === 'undefined') {
     return;
   }
@@ -104,25 +147,41 @@ export function saveWorkbook(wb: XLSX.WorkBook, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+const FROZEN_PANE_XML =
+  '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
+  '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>';
+
 /**
- * Builds an Excel workbook for any level table (SubType, Distributor, Territory, Brick, Customer)
- * and triggers a browser download.
+ * SheetJS Community Edition can't write frozen panes, so post-process the .xlsx (zip)
+ * and inject a frozen top-row pane into every worksheet's <sheetView>.
+ */
+export function freezeHeaderRow(xlsx: Uint8Array): Uint8Array {
+  const files = unzipSync(xlsx);
+  for (const path of Object.keys(files)) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(path)) continue;
+    const xml = strFromU8(files[path]);
+    const patched = xml.replace(/<sheetView\b([^>]*?)\/>/, `<sheetView$1>${FROZEN_PANE_XML}</sheetView>`);
+    if (patched !== xml) files[path] = strToU8(patched);
+  }
+  return zipSync(files, { level: 6 });
+}
+
+/**
+ * Builds a flat Excel sheet for one level table (SubType, Distributor, Chains, Territory, Brick,
+ * Customer): every visible parent row broken down into all of its Items, one row per
+ * parent Ã— Item, in the currently selected metric. Triggers a browser download.
  */
 export function exportLevelTableToExcel({
   level,
   label,
   rows,
-  total,
-  totalCount,
+  itemsByRow,
   period,
   metric,
   portfolioTotals,
   showReturns,
-  tableGrossTotals,
 }: ExportLevelTableOptions): void {
   const wb = XLSX.utils.book_new();
-
-  const hasExpanded = rows.some((r) => r.kind === 'item' || r.kind === 'chain');
 
   const metricSuffix = metric === 'units' ? 'Units' : 'EGP';
   const pyHeader = `PY (${period.pyLabel}) [${metricSuffix}]`;
@@ -134,7 +193,7 @@ export function exportLevelTableToExcel({
     ? metric === 'units'
       ? portfolioTotals.pyQ
       : portfolioTotals.pyV
-    : total.py;
+    : deriveRow(sumRows(rows), metric).py;
 
   const metricTailHeaders = showReturns
     ? [
@@ -150,20 +209,7 @@ export function exportLevelTableToExcel({
       ]
     : [pyHeader, cyHeader, growthHeader, pctHeader, contribHeader, 'Status'];
 
-  let headers: string[];
-  if (level === 'customer') {
-    headers = hasExpanded
-      ? ['Customer ID', 'Customer Name / Item', 'Brick (CY)', 'SubType', 'Type', 'Brand', ...metricTailHeaders]
-      : ['Customer ID', 'Customer Name', 'Brick (CY)', 'SubType', ...metricTailHeaders];
-  } else if (level === 'brick') {
-    headers = hasExpanded
-      ? ['Brick / Item', 'Territory', 'Type', 'Brand', ...metricTailHeaders]
-      : ['Brick', 'Territory', ...metricTailHeaders];
-  } else {
-    headers = hasExpanded
-      ? [`${label} / Item`, 'Type', 'Brand', ...metricTailHeaders]
-      : [label, ...metricTailHeaders];
-  }
+  const headers = [...flatLevelPrefixHeaders(level, label), ...metricTailHeaders];
 
   const tailLen = metricTailHeaders.length;
   const pyColIdx = headers.length - tailLen;
@@ -175,156 +221,48 @@ export function exportLevelTableToExcel({
   const returnsColIdx = showReturns ? pyColIdx + 6 : -1;
   const returnsPctColIdx = showReturns ? pyColIdx + 7 : -1;
 
-  const dataRows: (string | number)[][] = [];
+  const buildTail = (row: GroupRow): (string | number)[] => {
+    const d = deriveRow(row.sums, metric);
+    const growthVal = formatGrowthCell(d.growth);
+    const contribVal = formatContribCell(d.delta, totalPy);
+    const statusVal = formatStatusLabel(d.status);
+    if (!showReturns) return [d.py, d.cy, d.delta, growthVal, contribVal, statusVal];
 
-  for (const fr of rows) {
-    if (fr.kind === 'status' || !fr.row || !fr.d) continue;
+    const grossCy = row.gross ? (metric === 'units' ? row.gross.cyQ : row.gross.cyV) : d.cy;
+    const returnsCy = d.cy - grossCy;
+    const retPct = row.gross ? returnsRatePct(row.sums.cyV, row.gross.cyV) : null;
+    const retPctCell: number | string = retPct !== null ? retPct / 100 : 'â€“';
+    return [d.py, d.cy, d.delta, growthVal, contribVal, grossCy, returnsCy, retPctCell, statusVal];
+  };
 
-    const pyVal = fr.d.py ?? 0;
-    const cyVal = fr.d.cy ?? 0;
-    const deltaVal = fr.d.delta;
-
-    const growthVal = formatGrowthCell(fr.d.growth);
-    const rawContrib = fr.contribPp !== undefined ? fr.contribPp : contributionPp(deltaVal, totalPy);
-    const contribVal: number | string = rawContrib !== null && Number.isFinite(rawContrib) ? rawContrib : '–';
-    const statusVal = formatStatusLabel(fr.d.status);
-
-    const grossCy = fr.row.gross ? (metric === 'units' ? fr.row.gross.cyQ : fr.row.gross.cyV) : cyVal;
-    const returnsCy = cyVal - grossCy;
-    const retPct = fr.row.gross ? returnsRatePct(fr.row.sums.cyV, fr.row.gross.cyV) : null;
-    const retPctCell: number | string = retPct !== null ? retPct / 100 : '–';
-
-    const tailCells: (string | number)[] = showReturns
-      ? [pyVal, cyVal, deltaVal, growthVal, contribVal, grossCy, returnsCy, retPctCell, statusVal]
-      : [pyVal, cyVal, deltaVal, growthVal, contribVal, statusVal];
-
-    const depth = fr.depth ?? 0;
-    const indent = '  '.repeat(depth);
-    const rowLabel = indent + (fr.kind === 'chain' ? `[Chain] ${fr.row.label}` : fr.row.label);
-    const rowType = fr.kind === 'chain' ? 'Chain' : fr.kind === 'item' ? 'Item' : label;
-    const brandVal = fr.row.brand ?? '';
-
-    if (level === 'customer') {
-      if (hasExpanded) {
-        if (fr.kind === 'item') {
-          dataRows.push(['', rowLabel, '', '', rowType, brandVal, ...tailCells]);
-        } else {
-          dataRows.push([
-            fr.row.customerId ?? '',
-            rowLabel,
-            fr.row.brick ?? '',
-            fr.row.subType ?? '',
-            rowType,
-            '',
-            ...tailCells,
-          ]);
-        }
-      } else {
-        dataRows.push([
-          fr.row.customerId ?? '',
-          fr.row.label,
-          fr.row.brick ?? '',
-          fr.row.subType ?? '',
-          ...tailCells,
-        ]);
-      }
-    } else if (level === 'brick') {
-      if (hasExpanded) {
-        if (fr.kind === 'item') {
-          dataRows.push([rowLabel, '', rowType, brandVal, ...tailCells]);
-        } else {
-          dataRows.push([rowLabel, fr.row.territory ?? '', rowType, '', ...tailCells]);
-        }
-      } else {
-        dataRows.push([fr.row.label, fr.row.territory ?? '', ...tailCells]);
-      }
-    } else {
-      if (hasExpanded) {
-        dataRows.push([rowLabel, rowType, brandVal, ...tailCells]);
-      } else {
-        dataRows.push([fr.row.label, ...tailCells]);
-      }
-    }
-  }
-
-  // Summary Total Row
-  const totalLabel = `Total (${totalCount.toLocaleString('en-US')} ${label.toLowerCase()}s)`;
-  const totalGrowthVal = formatGrowthCell(total.growth);
-  const totalContribVal = formatContribCell(total.delta, totalPy);
-  const totalStatus = formatStatusLabel(total.status);
-
-  const totGrossCy = tableGrossTotals
-    ? metric === 'units'
-      ? tableGrossTotals.cyQ
-      : tableGrossTotals.cyV
-    : total.cy;
-  const totReturnsCy = total.cy - totGrossCy;
-  const totRetPct = tableGrossTotals
-    ? returnsRatePct(metric === 'units' ? total.cy : total.cy, tableGrossTotals.cyV)
-    : null;
-  const totRetPctCell: number | string = totRetPct !== null ? totRetPct / 100 : '–';
-
-  const totalTailCells: (string | number)[] = showReturns
-    ? [total.py, total.cy, total.delta, totalGrowthVal, totalContribVal, totGrossCy, totReturnsCy, totRetPctCell, totalStatus]
-    : [total.py, total.cy, total.delta, totalGrowthVal, totalContribVal, totalStatus];
-
-  let totalRow: (string | number)[];
-  if (level === 'customer') {
-    totalRow = hasExpanded
-      ? ['', totalLabel, '', '', 'Total', '', ...totalTailCells]
-      : ['', totalLabel, '', '', ...totalTailCells];
-  } else if (level === 'brick') {
-    totalRow = hasExpanded
-      ? [totalLabel, '', 'Total', '', ...totalTailCells]
-      : [totalLabel, '', ...totalTailCells];
-  } else {
-    totalRow = hasExpanded
-      ? [totalLabel, 'Total', '', ...totalTailCells]
-      : [totalLabel, ...totalTailCells];
-  }
-  dataRows.push(totalRow);
+  const dataRows = buildFlatLevelRows(level, rows, itemsByRow, metric, buildTail);
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
 
   // Set cell number formats
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
   for (let R = 1; R <= range.e.r; ++R) {
-    const pyCell = ws[XLSX.utils.encode_cell({ r: R, c: pyColIdx })];
-    if (pyCell && typeof pyCell.v === 'number') pyCell.z = '#,##0';
-
-    const cyCell = ws[XLSX.utils.encode_cell({ r: R, c: cyColIdx })];
-    if (cyCell && typeof cyCell.v === 'number') cyCell.z = '#,##0';
-
-    const deltaCell = ws[XLSX.utils.encode_cell({ r: R, c: deltaColIdx })];
-    if (deltaCell && typeof deltaCell.v === 'number') deltaCell.z = '+#,##0;-#,##0;0';
-
-    const growthCell = ws[XLSX.utils.encode_cell({ r: R, c: growthColIdx })];
-    if (growthCell && typeof growthCell.v === 'number') growthCell.z = '+0.0%;-0.0%;0.0%';
-
-    const contribCell = ws[XLSX.utils.encode_cell({ r: R, c: contribColIdx })];
-    if (contribCell && typeof contribCell.v === 'number') contribCell.z = '+0.00"%";-0.00"%";0.00"%"';
-
+    setCellFormat(ws, R, pyColIdx, '#,##0');
+    setCellFormat(ws, R, cyColIdx, '#,##0');
+    setCellFormat(ws, R, deltaColIdx, '+#,##0;-#,##0;0');
+    setCellFormat(ws, R, growthColIdx, '+0.0%;-0.0%;0.0%');
+    setCellFormat(ws, R, contribColIdx, '+0.00"%";-0.00"%";0.00"%"');
     if (showReturns) {
-      const gCell = ws[XLSX.utils.encode_cell({ r: R, c: grossColIdx })];
-      if (gCell && typeof gCell.v === 'number') gCell.z = '#,##0';
-
-      const rCell = ws[XLSX.utils.encode_cell({ r: R, c: returnsColIdx })];
-      if (rCell && typeof rCell.v === 'number') rCell.z = '+#,##0;-#,##0;0';
-
-      const rpCell = ws[XLSX.utils.encode_cell({ r: R, c: returnsPctColIdx })];
-      if (rpCell && typeof rpCell.v === 'number') rpCell.z = '0.0%';
+      setCellFormat(ws, R, grossColIdx, '#,##0');
+      setCellFormat(ws, R, returnsColIdx, '+#,##0;-#,##0;0');
+      setCellFormat(ws, R, returnsPctColIdx, '0.0%');
     }
   }
 
-  // Compute column widths
   ws['!cols'] = computeColWidths(headers, dataRows);
+  applyAutoFilter(ws, headers.length, dataRows.length);
 
   const sheetName = `${label} Level`.slice(0, 31);
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
   const safeLabel = label.replace(/\s+/g, '_');
   const filename = `HPG_${safeLabel}_Level_${period.cyLabel}_${metric}.xlsx`;
-  saveWorkbook(wb, filename);
+  saveWorkbook(wb, filename, { freezeHeader: true });
 }
 
 export interface WatchlistExportCustomer {
@@ -377,7 +315,7 @@ export function exportDefectorWatchlistToExcel({
   const dataRows: (string | number)[][] = [];
 
   for (const c of customers) {
-    const contribVal: number | string = c.contribPp !== null && Number.isFinite(c.contribPp) ? c.contribPp : '–';
+    const contribVal: number | string = c.contribPp !== null && Number.isFinite(c.contribPp) ? c.contribPp : 'â€“';
     if (hasItems) {
       dataRows.push([
         c.row.customerId ?? '',
@@ -392,7 +330,7 @@ export function exportDefectorWatchlistToExcel({
       if (c.items) {
         for (const it of c.items) {
           const itPy = metric === 'units' ? it.sums.pyQ : it.sums.pyV;
-          dataRows.push(['', `  ${it.label}`, '', '', 'Item', it.brand ?? '', itPy, '–']);
+          dataRows.push(['', `  ${it.label}`, '', '', 'Item', it.brand ?? '', itPy, 'â€“']);
         }
       }
     } else {
@@ -441,7 +379,7 @@ export interface ExportProductExposureOptions {
 }
 
 /**
- * Exports the Product × Customer-Segment Exposure Matrix and Customer-Behavior Decomposition
+ * Exports the Product Ã— Customer-Segment Exposure Matrix and Customer-Behavior Decomposition
  * for the selected level (Item / Brand / Line) to Excel.
  */
 export function exportProductExposureToExcel({
@@ -465,33 +403,33 @@ export function exportProductExposureToExcel({
   const metricHeaders = [
     `PY (${period.pyLabel}) [${metricSuffix}]`,
     `CY (${period.cyLabel}) [${metricSuffix}]`,
-    `YoY Δ [${metricSuffix}]`,
+    `YoY Î” [${metricSuffix}]`,
     'YoY %',
-    `New Seg Δ [${metricSuffix}]`,
+    `New Seg Î” [${metricSuffix}]`,
     'New Seg pp',
-    `Growing Seg Δ [${metricSuffix}]`,
+    `Growing Seg Î” [${metricSuffix}]`,
     'Growing Seg pp',
-    `Stable Seg Δ [${metricSuffix}]`,
+    `Stable Seg Î” [${metricSuffix}]`,
     'Stable Seg pp',
-    `Declining Seg Δ [${metricSuffix}]`,
+    `Declining Seg Î” [${metricSuffix}]`,
     'Declining Seg pp',
-    `Lost Seg Δ [${metricSuffix}]`,
+    `Lost Seg Î” [${metricSuffix}]`,
     'Lost Seg pp',
     `+New Cust Effect [${metricSuffix}]`,
     '+New Cust pp',
     `+Expansion Effect [${metricSuffix}]`,
     '+Expansion pp',
-    `−Contraction Effect [${metricSuffix}]`,
-    '−Contraction pp',
-    `−Lost Cust Effect [${metricSuffix}]`,
-    '−Lost Cust pp',
+    `âˆ’Contraction Effect [${metricSuffix}]`,
+    'âˆ’Contraction pp',
+    `âˆ’Lost Cust Effect [${metricSuffix}]`,
+    'âˆ’Lost Cust pp',
   ];
 
   const headers = [...prefixHeaders, ...metricHeaders];
   const pLen = prefixHeaders.length;
 
   const ppCell = (pp: number | null): number | string =>
-    pp !== null && Number.isFinite(pp) ? pp : '–';
+    pp !== null && Number.isFinite(pp) ? pp : 'â€“';
 
   const segDelta = (r: ProductSegmentBreakdown, seg: 'new' | 'growing' | 'stable' | 'declining' | 'lost') => {
     const p = metricPair(r.segments[seg], metric);
@@ -510,7 +448,7 @@ export function exportProductExposureToExcel({
     } else if (d.growth.kind === 'new') {
       growthVal = 'New';
     } else {
-      growthVal = '–';
+      growthVal = 'â€“';
     }
 
     const prefix =
@@ -637,9 +575,9 @@ function sortRowsByDeltaDesc(rows: GroupRow[], metric: Metric): GroupRow[] {
 }
 
 /**
- * Exports multiple level tables into a single multi-tab Excel workbook,
- * each level in its own worksheet with hierarchical per-product (Item) rows
- * and side-by-side Units and Value (EGP) columns.
+ * Exports multiple level tables into a single multi-tab Excel workbook, each level in its
+ * own worksheet as a flat table (one row per level value Ã— Item, parent columns repeated)
+ * with side-by-side Units and Value (EGP) columns.
  */
 export function exportAllLevelsToExcel({
   levels = TABLE_LEVELS,
@@ -647,9 +585,8 @@ export function exportAllLevelsToExcel({
   itemsByLevel,
   period,
   metric,
-  portfolioTotals,
-  portfolioGrossTotals,
   showReturns,
+  portfolioTotals,
 }: ExportAllLevelsOptions): void {
   const wb = XLSX.utils.book_new();
   const totalPyUnits = portfolioTotals.pyQ;
@@ -672,7 +609,8 @@ export function exportAllLevelsToExcel({
     'Status',
   ];
 
-  const buildTailCells = (sums: Sums, gross?: Sums): (string | number)[] => {
+  const buildTailCells = (row: GroupRow): (string | number)[] => {
+    const { sums, gross } = row;
     const u = deriveRow(sums, 'units');
     const v = deriveRow(sums, 'value');
     const statusVal = formatStatusLabel((metric === 'units' ? u : v).status);
@@ -699,81 +637,19 @@ export function exportAllLevelsToExcel({
     const grossCyV = gross ? gross.cyV : sums.cyV;
     const returnsCyV = sums.cyV - grossCyV;
     const retPct = gross ? returnsRatePct(sums.cyV, gross.cyV) : null;
-    const retPctCell: number | string = retPct !== null ? retPct / 100 : '–';
+    const retPctCell: number | string = retPct !== null ? retPct / 100 : 'â€“';
 
     return [...base, grossCyQ, returnsCyQ, grossCyV, returnsCyV, retPctCell, statusVal];
   };
 
   for (const level of levels) {
     const label = LEVEL_LABEL[level];
-    const prefixHeaders =
-      level === 'customer'
-        ? ['Customer ID', 'Customer Name / Item', 'Brick (CY)', 'SubType', 'Type', 'Brand']
-        : level === 'brick'
-          ? ['Brick / Item', 'Territory', 'Type', 'Brand']
-          : [`${label} / Item`, 'Type', 'Brand'];
-
+    const prefixHeaders = flatLevelPrefixHeaders(level, label);
     const headers = [...prefixHeaders, ...metricTailHeaders];
     const pLen = prefixHeaders.length;
 
     const topList = sortRowsByDeltaDesc(levelsData[level] ?? [], metric);
-    const levelItems = itemsByLevel[level] ?? {};
-    const dataRows: (string | number)[][] = [];
-
-    for (const r of topList) {
-      const parentTail = buildTailCells(r.sums, r.gross);
-      if (level === 'customer') {
-        dataRows.push([
-          r.customerId ?? '',
-          r.label,
-          r.brick ?? '',
-          r.subType ?? '',
-          label,
-          '',
-          ...parentTail,
-        ]);
-      } else if (level === 'brick') {
-        dataRows.push([r.label, r.territory ?? '', label, '', ...parentTail]);
-      } else {
-        dataRows.push([r.label, label, '', ...parentTail]);
-      }
-
-      const children = sortRowsByDeltaDesc(levelItems[r.id] ?? [], metric);
-      for (const it of children) {
-        const itemTail = buildTailCells(it.sums, it.gross);
-        const indentedLabel = `  ${it.label}`;
-        if (level === 'customer') {
-          dataRows.push(['', indentedLabel, '', '', 'Item', it.brand ?? '', ...itemTail]);
-        } else if (level === 'brick') {
-          dataRows.push([indentedLabel, '', 'Item', it.brand ?? '', ...itemTail]);
-        } else {
-          dataRows.push([indentedLabel, 'Item', it.brand ?? '', ...itemTail]);
-        }
-      }
-    }
-
-    const totalSums = sumRows(topList);
-    let hasGross = false;
-    const tableGrossTotals = emptySums();
-    for (const r of topList) {
-      if (r.gross) {
-        hasGross = true;
-        tableGrossTotals.pyQ += r.gross.pyQ;
-        tableGrossTotals.pyV += r.gross.pyV;
-        tableGrossTotals.cyQ += r.gross.cyQ;
-        tableGrossTotals.cyV += r.gross.cyV;
-      }
-    }
-    const totalTail = buildTailCells(totalSums, hasGross ? tableGrossTotals : portfolioGrossTotals);
-    const totalLabel = `Total (${topList.length.toLocaleString('en-US')} ${label.toLowerCase()}s)`;
-
-    if (level === 'customer') {
-      dataRows.push(['', totalLabel, '', '', 'Total', '', ...totalTail]);
-    } else if (level === 'brick') {
-      dataRows.push([totalLabel, '', 'Total', '', ...totalTail]);
-    } else {
-      dataRows.push([totalLabel, 'Total', '', ...totalTail]);
-    }
+    const dataRows = buildFlatLevelRows(level, topList, itemsByLevel[level] ?? {}, metric, buildTailCells);
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
@@ -800,11 +676,10 @@ export function exportAllLevelsToExcel({
     }
 
     ws['!cols'] = computeColWidths(headers, dataRows);
+    applyAutoFilter(ws, headers.length, dataRows.length);
     const sheetName = `${label} Level`.slice(0, 31);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   }
 
-  saveWorkbook(wb, `HPG_All_Levels_${period.cyLabel}.xlsx`);
+  saveWorkbook(wb, `HPG_All_Levels_${period.cyLabel}.xlsx`, { freezeHeader: true });
 }
-
-

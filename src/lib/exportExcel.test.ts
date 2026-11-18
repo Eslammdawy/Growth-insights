@@ -1,99 +1,74 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
+import { strFromU8, unzipSync } from 'fflate';
 import {
-  ExportableRowItem,
   exportAllLevelsToExcel,
   exportDefectorWatchlistToExcel,
   exportLevelTableToExcel,
   exportProductExposureToExcel,
+  freezeHeaderRow,
 } from './exportExcel';
 import { GroupRow, Level, TABLE_LEVELS } from './aggregate';
-import { DerivedRow, buildProductSegmentBreakdown, decomposeCustomerBehavior, emptySums } from './metrics';
+import { buildProductSegmentBreakdown, decomposeCustomerBehavior, emptySums } from './metrics';
 
 describe('exportLevelTableToExcel', () => {
-  it('generates a valid Excel file for customer level table with unexpanded rows', () => {
+  const custRow = (id: string, cid: string, label: string, brick: string, subType: string, sums: GroupRow['sums']): GroupRow => ({
+    id,
+    field: 'CustomerID',
+    value: id,
+    label,
+    customerId: cid,
+    brick,
+    subType,
+    sums,
+    rowCount: 1,
+  });
+  const itemRow = (id: string, label: string, brand: string, sums: GroupRow['sums'], gross?: GroupRow['sums']): GroupRow => ({
+    id,
+    field: 'Item',
+    value: label,
+    label,
+    brand,
+    sums,
+    gross,
+    rowCount: 1,
+  });
+
+  it('exports the customer level as a flat table: customer columns repeated on every item row, no Type / Total rows', () => {
     const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
-
-    const total: DerivedRow = {
-      py: 100000,
-      cy: 150000,
-      delta: 50000,
-      growth: { kind: 'pct', value: 0.5 },
-      growthNum: 0.5,
-      status: 'growing',
-    };
-
-    const rows: ExportableRowItem[] = [
-      {
-        kind: 'row',
-        row: {
-          id: 'cust-1',
-          field: 'CustomerID',
-          value: 'cust-1',
-          label: 'Customer Alpha',
-          customerId: 'C001',
-          brick: 'Downtown',
-          subType: 'Chain',
-          sums: { pyQ: 100, pyV: 60000, cyQ: 120, cyV: 90000 },
-          rowCount: 5,
-        },
-        d: {
-          py: 60000,
-          cy: 90000,
-          delta: 30000,
-          growth: { kind: 'pct', value: 0.5 },
-          growthNum: 0.5,
-          status: 'growing',
-        },
-        depth: 0,
-      },
-      {
-        kind: 'row',
-        row: {
-          id: 'cust-2',
-          field: 'CustomerID',
-          value: 'cust-2',
-          label: 'Customer Beta',
-          customerId: 'C002',
-          brick: 'Giza',
-          subType: 'Community',
-          sums: { pyQ: 80, pyV: 40000, cyQ: 90, cyV: 60000 },
-          rowCount: 3,
-        },
-        d: {
-          py: 40000,
-          cy: 60000,
-          delta: 20000,
-          growth: { kind: 'pct', value: 0.5 },
-          growthNum: 0.5,
-          status: 'growing',
-        },
-        depth: 0,
-      },
-    ];
-
     try {
+      const rows = [
+        custRow('cust-1', 'C001', 'Customer Alpha', 'Downtown', 'Chain', { pyQ: 100, pyV: 60000, cyQ: 120, cyV: 90000 }),
+        custRow('cust-2', 'C002', 'Customer Beta', 'Giza', 'Community', { pyQ: 80, pyV: 40000, cyQ: 90, cyV: 60000 }),
+      ];
+      const itemsByRow: Record<string, GroupRow[]> = {
+        'cust-1': [
+          itemRow('cust-1|A', 'Item A', 'Brand A', { pyQ: 50, pyV: 30000, cyQ: 50, cyV: 35000 }),
+          itemRow('cust-1|B', 'Item B', 'Brand B', { pyQ: 50, pyV: 30000, cyQ: 70, cyV: 55000 }),
+        ],
+        // cust-2 has no item breakdown â†’ emitted once with blank Item / Brand
+      };
+
       exportLevelTableToExcel({
         level: 'customer',
         label: 'Customer',
         rows,
-        total,
-        totalCount: 2,
+        itemsByRow,
         period: { pyLabel: 'Q3-2025', cyLabel: 'Q3-2026' },
         metric: 'value',
+        portfolioTotals: { pyQ: 180, pyV: 100000, cyQ: 210, cyV: 150000 },
       });
 
-      expect(appendSheetSpy).toHaveBeenCalled();
       const [, ws, sheetName] = appendSheetSpy.mock.calls[appendSheetSpy.mock.calls.length - 1];
       expect(sheetName).toBe('Customer Level');
-
-      // Verify sheet data
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as (string | number)[][];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as (string | number)[][];
       expect(data[0]).toEqual([
         'Customer ID',
         'Customer Name',
         'Brick (CY)',
         'SubType',
+        'Item',
+        'Brand',
         'PY (Q3-2025) [EGP]',
         'CY (Q3-2026) [EGP]',
         'YoY Growth [EGP]',
@@ -101,122 +76,59 @@ describe('exportLevelTableToExcel', () => {
         'Contrib. %',
         'Status',
       ]);
-      expect(data[1][0]).toBe('C001');
-      expect(data[1][1]).toBe('Customer Alpha');
-      expect(data[1][8]).toBeCloseTo(30, 5);
-      expect(data[2][0]).toBe('C002');
-      expect(data[2][1]).toBe('Customer Beta');
-      expect(data[2][8]).toBeCloseTo(20, 5);
-      // Total row
-      const totalRow = data[3];
-      expect(totalRow[1]).toBe('Total (2 customers)');
-      expect(totalRow[4]).toBe(100000);
-      expect(totalRow[5]).toBe(150000);
-      expect(totalRow[6]).toBe(50000);
-      expect(totalRow[7]).toBe(0.5);
-      expect(totalRow[8]).toBeCloseTo(50, 5);
-      expect(totalRow[9]).toBe('Growing');
+      // Items sorted by Î” desc within the customer (Item B +25000 before Item A +5000)
+      expect(data[1].slice(0, 6)).toEqual(['C001', 'Customer Alpha', 'Downtown', 'Chain', 'Item B', 'Brand B']);
+      expect(data[1][8]).toBe(25000);
+      expect(data[1][10]).toBeCloseTo(25, 5);
+      expect(data[2].slice(0, 6)).toEqual(['C001', 'Customer Alpha', 'Downtown', 'Chain', 'Item A', 'Brand A']);
+      expect(data[3].slice(0, 6)).toEqual(['C002', 'Customer Beta', 'Giza', 'Community', '', '']);
+      expect(data[3][8]).toBe(20000);
+      expect(data).toHaveLength(4); // header + 3 data rows, no Total row
+      expect(ws['!autofilter']).toEqual({ ref: 'A1:L4' });
     } finally {
       appendSheetSpy.mockRestore();
     }
   });
 
-  it('generates a valid Excel file for subtype level table with expanded items and chains', () => {
+  it('exports the subtype level as a flat table (SubType | Item | Brand), ignoring the chain breakdown', () => {
     const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
-
-    const total: DerivedRow = {
-      py: 50000,
-      cy: 60000,
-      delta: 10000,
-      growth: { kind: 'pct', value: 0.2 },
-      growthNum: 0.2,
-      status: 'growing',
-    };
-
-    const rows: ExportableRowItem[] = [
-      {
-        kind: 'row',
-        row: {
-          id: 'sub-chain',
-          field: 'SubType',
-          value: 'Chain',
-          label: 'Chain',
-          sums: { pyQ: 50, pyV: 50000, cyQ: 60, cyV: 60000 },
-          rowCount: 2,
-        },
-        d: {
-          py: 50000,
-          cy: 60000,
-          delta: 10000,
-          growth: { kind: 'pct', value: 0.2 },
-          growthNum: 0.2,
-          status: 'growing',
-        },
-        depth: 0,
-      },
-      {
-        kind: 'chain',
-        row: {
-          id: 'sub-chain-ezaby',
-          field: 'Chain',
-          value: 'Ezaby',
-          label: 'Ezaby',
-          parentValue: 'Chain',
-          sums: { pyQ: 30, pyV: 30000, cyQ: 40, cyV: 40000 },
-          rowCount: 1,
-        },
-        d: {
-          py: 30000,
-          cy: 40000,
-          delta: 10000,
-          growth: { kind: 'pct', value: 0.3333 },
-          growthNum: 0.3333,
-          status: 'growing',
-        },
-        depth: 1,
-      },
-      {
-        kind: 'item',
-        row: {
-          id: 'item-panadol',
-          field: 'Item',
-          value: 'Panadol Extra',
-          label: 'Panadol Extra',
-          brand: 'Panadol',
-          sums: { pyQ: 30, pyV: 30000, cyQ: 40, cyV: 40000 },
-          rowCount: 1,
-        },
-        d: {
-          py: 30000,
-          cy: 40000,
-          delta: 10000,
-          growth: { kind: 'pct', value: 0.3333 },
-          growthNum: 0.3333,
-          status: 'growing',
-        },
-        depth: 2,
-      },
-    ];
-
     try {
+      const parent: GroupRow = {
+        id: 'SubType:Chain',
+        field: 'SubType',
+        value: 'Chain',
+        label: 'Chain',
+        sums: { pyQ: 50, pyV: 50000, cyQ: 60, cyV: 60000 },
+        rowCount: 2,
+        children: [
+          {
+            id: 'SubType:Chain|Chain:Ezaby',
+            field: 'Chain',
+            value: 'Ezaby',
+            label: 'Ezaby',
+            parentValue: 'Chain',
+            sums: { pyQ: 50, pyV: 50000, cyQ: 60, cyV: 60000 },
+            rowCount: 1,
+          },
+        ],
+      };
       exportLevelTableToExcel({
         level: 'subtype',
         label: 'SubType',
-        rows,
-        total,
-        totalCount: 1,
+        rows: [parent],
+        itemsByRow: {
+          'SubType:Chain': [itemRow('i1', 'Panadol Extra', 'Panadol', { pyQ: 50, pyV: 50000, cyQ: 60, cyV: 60000 })],
+        },
         period: { pyLabel: 'Q3-2025', cyLabel: 'Q3-2026' },
         metric: 'units',
       });
 
-      expect(appendSheetSpy).toHaveBeenCalled();
       const [, ws, sheetName] = appendSheetSpy.mock.calls[appendSheetSpy.mock.calls.length - 1];
       expect(sheetName).toBe('SubType Level');
-
       const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as (string | number)[][];
       expect(data[0]).toEqual([
-        'SubType / Item',
-        'Type',
+        'SubType',
+        'Item',
         'Brand',
         'PY (Q3-2025) [Units]',
         'CY (Q3-2026) [Units]',
@@ -225,58 +137,62 @@ describe('exportLevelTableToExcel', () => {
         'Contrib. %',
         'Status',
       ]);
-      expect(data[1][0]).toBe('Chain');
-      expect(data[1][1]).toBe('SubType');
-      expect(data[2][0]).toBe('  [Chain] Ezaby');
-      expect(data[2][1]).toBe('Chain');
-      expect(data[3][0]).toBe('    Panadol Extra');
-      expect(data[3][1]).toBe('Item');
-      expect(data[3][2]).toBe('Panadol');
+      expect(data.slice(1)).toEqual([['Chain', 'Panadol Extra', 'Panadol', 50, 60, 10, 0.2, 20, 'Growing']]);
     } finally {
       appendSheetSpy.mockRestore();
     }
   });
 
+  it('freezeHeaderRow injects a frozen top-row pane into every worksheet', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['a'], [1]]), 'One');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['b'], [2]]), 'Two');
+    const raw = new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer);
+    const patched = freezeHeaderRow(raw);
+    const files = unzipSync(patched);
+    for (const p of ['xl/worksheets/sheet1.xml', 'xl/worksheets/sheet2.xml']) {
+      expect(strFromU8(files[p])).toContain('<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>');
+    }
+    // Still a readable workbook
+    const back = XLSX.read(patched, { type: 'array' });
+    expect(back.SheetNames).toEqual(['One', 'Two']);
+  });
+
   it('includes Gross, Returns, and Returns % columns when showReturns is enabled (WI-5) and exports Defector Watchlist (WI-4)', () => {
     const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
     try {
-      const total: DerivedRow = {
-        py: 100000,
-        cy: 90000,
-        delta: -10000,
-        growth: { kind: 'pct', value: -0.1 },
-        growthNum: -0.1,
-        status: 'declining',
-      };
       exportLevelTableToExcel({
         level: 'territory',
         label: 'Territory',
         rows: [
           {
-            kind: 'row',
-            row: {
-              id: 'terr-cairo',
-              field: 'Territory',
-              value: 'Cairo',
-              label: 'Cairo',
-              sums: { pyQ: 100, pyV: 100000, cyQ: 90, cyV: 90000 },
-              gross: { pyQ: 100, pyV: 100000, cyQ: 100, cyV: 100000 },
-              rowCount: 2,
-            },
-            d: total,
-            depth: 0,
+            id: 'terr-cairo',
+            field: 'Territory',
+            value: 'Cairo',
+            label: 'Cairo',
+            sums: { pyQ: 100, pyV: 100000, cyQ: 90, cyV: 90000 },
+            gross: { pyQ: 100, pyV: 100000, cyQ: 100, cyV: 100000 },
+            rowCount: 2,
           },
         ],
-        total,
-        totalCount: 1,
+        itemsByRow: {
+          'terr-cairo': [
+            itemRow('terr-cairo|X', 'Item X', 'Brand X', { pyQ: 100, pyV: 100000, cyQ: 90, cyV: 90000 }, {
+              pyQ: 100,
+              pyV: 100000,
+              cyQ: 100,
+              cyV: 100000,
+            }),
+          ],
+        },
         period: { pyLabel: 'Q3-2025', cyLabel: 'Q3-2026' },
         metric: 'value',
         showReturns: true,
-        tableGrossTotals: { pyQ: 100, pyV: 100000, cyQ: 100, cyV: 100000 },
       });
 
       const [, wsReturns] = appendSheetSpy.mock.calls[appendSheetSpy.mock.calls.length - 1];
       const dataReturns = XLSX.utils.sheet_to_json(wsReturns, { header: 1 }) as (string | number)[][];
+      expect(dataReturns[1]).toEqual(['Cairo', 'Item X', 'Brand X', 100000, 90000, -10000, -0.1, -10, 100000, -10000, 0.1, 'Declining']);
       expect(dataReturns[0]).toContain('CY Gross [EGP]');
       expect(dataReturns[0]).toContain('CY Returns [EGP]');
       expect(dataReturns[0]).toContain('Returns %');
@@ -335,7 +251,7 @@ describe('exportLevelTableToExcel', () => {
     }
   });
 
-  it('exports Product × Customer-Segment Exposure Matrix and Customer-Behavior Decomposition to Excel', () => {
+  it('exports Product Ã— Customer-Segment Exposure Matrix and Customer-Behavior Decomposition to Excel', () => {
     const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
     try {
       const cb = decomposeCustomerBehavior(
@@ -392,7 +308,7 @@ describe('exportLevelTableToExcel', () => {
     }
   });
 
-  it('exports all 5 dashboard levels in separate tabs with hierarchical per-product rows, side-by-side Units & EGP, and optional Returns', () => {
+  it('exports all 5 dashboard levels in separate tabs as flat level × item tables, side-by-side Units & EGP, and optional Returns', () => {
     const appendSheetSpy = vi.spyOn(XLSX.utils, 'book_append_sheet');
     try {
       const makeRow = (
@@ -521,10 +437,11 @@ describe('exportLevelTableToExcel', () => {
       for (const c of calls) expect(c[0]).toBe(wbRef);
 
       // SubType sheet verification: parent + 2 items sorted by EGP delta desc (Item A +4000 tie-break before Item B +4000) + Total
+      // SubType sheet: flat rows only (SubType | Item | Brand), items sorted by EGP Î” desc with label tie-break, no parent / Total rows
       const subData = XLSX.utils.sheet_to_json(calls[0][1], { header: 1 }) as (string | number)[][];
       expect(subData[0]).toEqual([
-        'SubType / Item',
-        'Type',
+        'SubType',
+        'Item',
         'Brand',
         'PY (Q3-2025) [Units]',
         'CY (Q3-2026) [Units]',
@@ -538,43 +455,32 @@ describe('exportLevelTableToExcel', () => {
         'Contrib. % [EGP]',
         'Status',
       ]);
-      expect(subData[1][0]).toBe('Private');
-      expect(subData[1][1]).toBe('SubType');
-      expect(subData[1][3]).toBe(100); // PY Units
-      expect(subData[1][4]).toBe(150); // CY Units
-      expect(subData[1][5]).toBe(50); // Delta Units
-      expect(subData[1][6]).toBeCloseTo(0.5, 5); // Growth % Units
-      expect(subData[1][7]).toBeCloseTo(50, 5); // Contrib % Units
-      expect(subData[1][8]).toBe(10000); // PY EGP
-      expect(subData[1][9]).toBe(18000); // CY EGP
-      expect(subData[1][10]).toBe(8000); // Delta EGP
-      expect(subData[1][11]).toBeCloseTo(0.8, 5); // Growth % EGP
-      expect(subData[1][12]).toBeCloseTo(80, 5); // Contrib % EGP
+      expect(subData).toHaveLength(3);
+      expect(subData[1].slice(0, 3)).toEqual(['Private', 'Item A', 'Brand A']);
+      expect(subData[1][3]).toBe(80); // PY Units
+      expect(subData[1][4]).toBe(110); // CY Units
+      expect(subData[1][5]).toBe(30); // Delta Units
+      expect(subData[1][6]).toBeCloseTo(0.375, 5); // Growth % Units
+      expect(subData[1][7]).toBeCloseTo(30, 5); // Contrib % Units
+      expect(subData[1][8]).toBe(8000); // PY EGP
+      expect(subData[1][9]).toBe(12000); // CY EGP
+      expect(subData[1][10]).toBe(4000); // Delta EGP
+      expect(subData[1][11]).toBeCloseTo(0.5, 5); // Growth % EGP
+      expect(subData[1][12]).toBeCloseTo(40, 5); // Contrib % EGP
       expect(subData[1][13]).toBe('Growing');
+      expect(subData[2].slice(0, 3)).toEqual(['Private', 'Item B', 'Brand B']);
 
-      // Child Item rows indented and sorted by label on tie
-      expect(subData[2][0]).toBe('  Item A');
-      expect(subData[2][1]).toBe('Item');
-      expect(subData[2][2]).toBe('Brand A');
-      expect(subData[3][0]).toBe('  Item B');
-      expect(subData[3][1]).toBe('Item');
-      expect(subData[3][2]).toBe('Brand B');
-      expect(subData[4][0]).toBe('Total (1 subtypes)');
-      expect(subData[4][1]).toBe('Total');
+      // Chains sheet header
+      const chainData = XLSX.utils.sheet_to_json(calls[2][1], { header: 1 }) as (string | number)[][];
+      expect(chainData[0].slice(0, 3)).toEqual(['Chains', 'Item', 'Brand']);
+      expect(chainData[1].slice(0, 3)).toEqual(['Seif', 'Item A', 'Brand A']);
 
-      // Customer sheet verification
+      // Customer sheet: customer columns repeated on the item row
       const custData = XLSX.utils.sheet_to_json(calls[4][1], { header: 1 }) as (string | number)[][];
-      expect(custData[0].slice(0, 6)).toEqual([
-        'Customer ID',
-        'Customer Name / Item',
-        'Brick (CY)',
-        'SubType',
-        'Type',
-        'Brand',
-      ]);
-      expect(custData[1].slice(0, 6)).toEqual(['C001', 'Alpha Pharm', 'Downtown', 'Private', 'Customer', '']);
-      expect(custData[2].slice(0, 6)).toEqual(['', '  Item A', '', '', 'Item', 'Brand A']);
-      expect(custData[3].slice(0, 6)).toEqual(['', 'Total (1 customers)', '', '', 'Total', '']);
+      expect(custData[0].slice(0, 6)).toEqual(['Customer ID', 'Customer Name', 'Brick (CY)', 'SubType', 'Item', 'Brand']);
+      expect(custData[1].slice(0, 6)).toEqual(['C001', 'Alpha Pharm', 'Downtown', 'Private', 'Item A', 'Brand A']);
+      expect(custData).toHaveLength(2);
+      expect(calls[4][1]['!autofilter']).toBeDefined();
 
       // 2. With showReturns: true
       exportAllLevelsToExcel({
@@ -598,7 +504,12 @@ describe('exportLevelTableToExcel', () => {
         'Returns %',
         'Status',
       ]);
-      expect(subRetData[1].slice(13)).toEqual([160, -10, 20000, -2000, 0.1, 'Growing']);
+      // Item A row (Private Ã— Item A): gross CY 120 u / 14000 EGP vs net 110 u / 12000 EGP
+      expect(subRetData[1].slice(13, 17)).toEqual([120, -10, 14000, -2000]);
+      expect(subRetData[1][17]).toBeCloseTo(2000 / 14000, 5);
+      expect(subRetData[1][18]).toBe('Growing');
+      // Item B has no gross breakdown â†’ gross falls back to net, Returns % 'â€“'
+      expect(subRetData[2].slice(13)).toEqual([40, 0, 6000, 0, 'â€“', 'Growing']);
     } finally {
       appendSheetSpy.mockRestore();
     }

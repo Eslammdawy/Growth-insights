@@ -467,6 +467,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     setCustomerStatusFilter,
     itemsByRow,
     fetchItems,
+    fetchAllLevelsItems,
     addDrillRow,
   } = useDashboardStore(
     useShallow((s) => ({
@@ -482,6 +483,7 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
       setCustomerStatusFilter: s.setCustomerStatusFilter,
       itemsByRow: s.itemsByRow,
       fetchItems: s.fetchItems,
+      fetchAllLevelsItems: s.fetchAllLevelsItems,
       addDrillRow: s.addDrillRow,
     }))
   );
@@ -661,6 +663,31 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
     return s;
   }, [rowList]);
 
+  // Flat export: every visible parent row (status / search / Top-N, current sort order)
+  // broken down into all of its Items, regardless of what is expanded on screen.
+  const handleExportExcel = useCallback(async () => {
+    if (!rows || !period || !totals || exporting) return;
+    setExporting(true);
+    try {
+      const itemsByLevel = await fetchAllLevelsItems([level]);
+      if (!itemsByLevel) return;
+      exportLevelTableToExcel({
+        level,
+        label: LEVEL_LABEL[level],
+        rows: topRows.map((x) => x.row),
+        itemsByRow: itemsByLevel[level] ?? {},
+        period,
+        metric,
+        portfolioTotals: totals,
+        showReturns: effectiveShowReturns,
+      });
+    } catch (err) {
+      console.error('Failed to export table to Excel:', err);
+    } finally {
+      setExporting(false);
+    }
+  }, [rows, period, totals, exporting, fetchAllLevelsItems, level, topRows, metric, effectiveShowReturns]);
+
   if (!rows || !period || !totals) return null;
 
   const extraCols = level === 'customer' ? 2 : level === 'brick' ? 1 : 0;
@@ -675,28 +702,6 @@ export const LevelTable: React.FC<LevelTableProps> = ({ level }) => {
   const totalDown = total.status === 'declining' || total.status === 'lost';
   const statusOptions = level === 'customer' ? CUSTOMER_STATUS_OPTIONS : STATUS_OPTIONS;
 
-  const handleExportExcel = useCallback(() => {
-    if (!rows || !period || !totals) return;
-    setExporting(true);
-    try {
-      exportLevelTableToExcel({
-        level,
-        label,
-        rows: flat,
-        total,
-        totalCount: rowList.length,
-        period,
-        metric,
-        portfolioTotals: totals,
-        showReturns: effectiveShowReturns,
-        tableGrossTotals,
-      });
-    } catch (err) {
-      console.error('Failed to export table to Excel:', err);
-    } finally {
-      setExporting(false);
-    }
-  }, [rows, period, totals, level, label, flat, total, rowList.length, metric, effectiveShowReturns, tableGrossTotals]);
 
   const headerCell = (id: SortId, text: string, align: 'left' | 'right' = 'right') => {
     const isSorted = sort.id === id;
