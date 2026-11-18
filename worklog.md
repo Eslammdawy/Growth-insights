@@ -1,6 +1,6 @@
 # Worklog & Application Status (`worklog.md`)
 
-**Last Updated**: 2026-11-17
+**Last Updated**: 2026-11-18
 **Application**: Sales Growth Analyzer
 **Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`30/30`), and production Vite build (`npm run build`) pass with zero errors.
 
@@ -178,6 +178,10 @@
   - Updated `ProductCustomerExposure` line-row drilling to append into `lines`.
 - **Docs & Tests (`docs/DECISIONS.md`, `src/lib/acceptance.test.ts`)**:
   - Updated Decision #8 and added Decision #9 in `docs/DECISIONS.md`; added multi-line aggregation, cascading option, and URL hash round-trip assertions in `src/lib/acceptance.test.ts`.
+
+### 1.16 Documentation Sync Rule (2026-11-18)
+- Added `AGENTS.md` (in `app/`, plus a pointer at the workspace root) requiring `README.md` and `worklog.md` to be updated after every project change.
+- README: no changes needed (no user-facing behavior change).
 
 ---
 
