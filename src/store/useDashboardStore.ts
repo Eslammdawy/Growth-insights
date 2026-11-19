@@ -21,14 +21,14 @@ import {
   subTypeOptions,
 } from '../lib/aggregate';
 import { SAMPLE_DATA_URL, TX_TYPES, TxType } from '../lib/config';
+import { CheckboxFilterState, pruneCheckboxFilter } from '../lib/checkboxFilter';
 import { DataErrorKind } from '../lib/columnar';
-import { Metric, ProductExposureLevel } from '../lib/metrics';
+import { Metric } from '../lib/metrics';
 import { ParseProgress } from '../lib/parse';
 import { PeriodSelection, defaultSelection } from '../lib/periods';
 import { workerClient } from '../workers/workerClient';
 import {
   HeatmapMode,
-  ProductExposureView,
   parseHashParams,
   validateHashAgainstMeta,
   serializeHashState,
@@ -56,14 +56,13 @@ function syncHashToUrl(st: DashboardState) {
     mainTypes: st.mainTypes,
     subTypes: st.subTypes,
     distributors: st.distributors,
+    excludedDistributors: st.excludedDistributors,
     territories: st.territories,
     txTypes: st.txTypes,
     brands: st.brands,
     items: st.items,
     drill: st.drill,
     driverLevel: st.driverLevel,
-    productExposureLevel: st.productExposureLevel,
-    productExposureView: st.productExposureView,
     showReturns: st.showReturns,
     heatmapMode: st.heatmapMode,
   });
@@ -100,6 +99,7 @@ export interface DashboardState {
   mainTypes: string[];
   subTypes: string[];
   distributors: string[];
+  excludedDistributors: string[];
   territories: string[];
   brands: string[];
   items: string[];
@@ -109,8 +109,6 @@ export interface DashboardState {
   chartMode: 'delta' | 'growth';
   chartLevel: Level;
   driverLevel: InsightLevel;
-  productExposureLevel: ProductExposureLevel;
-  productExposureView: ProductExposureView;
   showReturns: boolean;
   heatmapMode: HeatmapMode;
   customerStatusFilter: StatusFilter;
@@ -129,6 +127,7 @@ export interface DashboardState {
   setMainTypes: (mainTypes: string[]) => void;
   setSubTypes: (subTypes: string[]) => void;
   setDistributors: (distributors: string[]) => void;
+  setDistributorFilter: (next: CheckboxFilterState) => void;
   setTerritories: (territories: string[]) => void;
   setBrands: (brands: string[]) => void;
   setItems: (items: string[]) => void;
@@ -139,8 +138,6 @@ export interface DashboardState {
   setChartMode: (m: 'delta' | 'growth') => void;
   setChartLevel: (l: Level) => void;
   setDriverLevel: (l: InsightLevel) => void;
-  setProductExposureLevel: (l: ProductExposureLevel) => void;
-  setProductExposureView: (v: ProductExposureView) => void;
   setShowReturns: (show: boolean) => void;
   setHeatmapMode: (m: HeatmapMode) => void;
   setCustomerStatusFilter: (s: StatusFilter) => void;
@@ -164,16 +161,31 @@ function currentQuery(st: DashboardState): AnalysisQuery {
     mainTypes: st.mainTypes,
     subTypes: st.subTypes,
     distributors: st.distributors,
+    excludeDistributors: st.excludedDistributors,
     territories: st.territories,
     drill: st.drill,
   };
 }
 
-/** Drops selected Distributors that have no sales for the given product scope (Line → Brand → Product → Distributor). */
-function pruneDistributors(st: DashboardState, scope: ProductScope): string[] {
-  if (!st.meta || st.distributors.length === 0) return st.distributors;
-  const valid = new Set(distributorOptions(st.meta, scope));
-  return st.distributors.filter((d) => valid.has(d));
+/** Preserves exclude/include distributor intent across product scope changes (Line → Brand → Product → Distributor). */
+function pruneDistributorSelection(
+  st: DashboardState,
+  scope: ProductScope,
+): { distributors: string[]; excludedDistributors: string[] } {
+  if (!st.meta) {
+    return { distributors: st.distributors, excludedDistributors: st.excludedDistributors };
+  }
+  if (st.distributors.length === 0 && st.excludedDistributors.length === 0) {
+    return { distributors: [], excludedDistributors: [] };
+  }
+  const cur: CheckboxFilterState =
+    st.distributors.length > 0
+      ? { mode: 'include', values: st.distributors }
+      : { mode: 'exclude', values: st.excludedDistributors };
+  const next = pruneCheckboxFilter(cur, distributorOptions(st.meta, scope));
+  return next.mode === 'include'
+    ? { distributors: next.values, excludedDistributors: [] }
+    : { distributors: [], excludedDistributors: next.values };
 }
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
@@ -194,6 +206,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   mainTypes: [],
   subTypes: [],
   distributors: [],
+  excludedDistributors: [],
   territories: [],
   brands: [],
   items: [],
@@ -202,8 +215,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   chartMode: 'delta',
   chartLevel: 'subtype',
   driverLevel: initialHash.driverLevel ?? 'subtype',
-  productExposureLevel: initialHash.productExposureLevel ?? 'item',
-  productExposureView: initialHash.productExposureView ?? 'all',
   showReturns: initialHash.showReturns ?? false,
   heatmapMode: initialHash.heatmapMode ?? 'yoy',
   customerStatusFilter: 'all',
@@ -228,14 +239,13 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         mainTypes: v.mainTypes,
         subTypes: v.subTypes,
         distributors: v.distributors,
+        excludedDistributors: v.excludedDistributors,
         territories: v.territories,
         txTypes: v.txTypes,
         brands: v.brands,
         items: v.items,
         drill: v.drill,
         driverLevel: v.driverLevel ?? get().driverLevel,
-        productExposureLevel: v.productExposureLevel ?? get().productExposureLevel,
-        productExposureView: v.productExposureView ?? get().productExposureView,
         showReturns: v.showReturns ?? get().showReturns,
         heatmapMode: v.heatmapMode ?? get().heatmapMode,
         loading: false,
@@ -323,7 +333,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       line: lines[0] ?? null,
       brands: nextBrands,
       items: nextItems,
-      distributors: pruneDistributors(st, { lines, brands: nextBrands, items: nextItems }),
+      ...pruneDistributorSelection(st, { lines, brands: nextBrands, items: nextItems }),
     });
     syncHashToUrl(get());
     void get().refreshAnalysis();
@@ -362,7 +372,16 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   setDistributors: (distributors) => {
-    set({ distributors });
+    set({ distributors, excludedDistributors: [] });
+    syncHashToUrl(get());
+    void get().refreshAnalysis();
+  },
+
+  setDistributorFilter: (next) => {
+    set({
+      distributors: next.mode === 'include' ? next.values : [],
+      excludedDistributors: next.mode === 'exclude' ? next.values : [],
+    });
     syncHashToUrl(get());
     void get().refreshAnalysis();
   },
@@ -380,7 +399,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     set({
       brands,
       items: nextItems,
-      distributors: pruneDistributors(st, { lines: st.lines, brands, items: nextItems }),
+      ...pruneDistributorSelection(st, { lines: st.lines, brands, items: nextItems }),
     });
     syncHashToUrl(get());
     void get().refreshAnalysis();
@@ -388,7 +407,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   setItems: (items) => {
     const st = get();
-    set({ items, distributors: pruneDistributors(st, { lines: st.lines, brands: st.brands, items }) });
+    set({
+      items,
+      ...pruneDistributorSelection(st, { lines: st.lines, brands: st.brands, items }),
+    });
     syncHashToUrl(get());
     void get().refreshAnalysis();
   },
@@ -428,6 +450,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       mainTypes: [],
       subTypes: [],
       distributors: [],
+      excludedDistributors: [],
       territories: [],
       brands: [],
       items: [],
@@ -441,14 +464,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setChartLevel: (chartLevel) => set({ chartLevel }),
   setDriverLevel: (driverLevel) => {
     set({ driverLevel });
-    syncHashToUrl(get());
-  },
-  setProductExposureLevel: (productExposureLevel) => {
-    set({ productExposureLevel });
-    syncHashToUrl(get());
-  },
-  setProductExposureView: (productExposureView) => {
-    set({ productExposureView });
     syncHashToUrl(get());
   },
   setShowReturns: (showReturns) => {
@@ -481,14 +496,13 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       mainTypes: v.mainTypes,
       subTypes: v.subTypes,
       distributors: v.distributors,
+      excludedDistributors: v.excludedDistributors,
       territories: v.territories,
       txTypes: v.txTypes,
       brands: v.brands,
       items: v.items,
       drill: v.drill,
       driverLevel: v.driverLevel ?? st.driverLevel,
-      productExposureLevel: v.productExposureLevel ?? st.productExposureLevel,
-      productExposureView: v.productExposureView ?? st.productExposureView,
       showReturns: v.showReturns ?? st.showReturns,
       heatmapMode: v.heatmapMode ?? st.heatmapMode,
     });

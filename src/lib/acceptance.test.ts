@@ -27,20 +27,15 @@ import {
 import {
   CUSTOMER_SEGMENTS,
   METRICS,
-  PRODUCT_EXPOSURE_LEVELS,
-  buildProductBehaviorWaterfall,
   classifyCustomerSegment,
   computeCustomerInsightsForMetric,
   contributionPp,
-  decomposeCustomerBehavior,
   decomposePriceVolume,
   deriveReturnsSums,
   deriveRow,
   growth,
   isReturnsFlagged,
-  isZero,
   metricCells,
-  metricPair,
   priceVolumeRow,
   returnsRatePct,
 } from './metrics';
@@ -69,6 +64,8 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(res.levels.distributor.find((r) => r.value.toLowerCase() === 'ezaby')).toBeUndefined();
     expect(res.levels.subtype.find((r) => r.value.toLowerCase().includes('ez'))).toBeUndefined();
     expect(sampleMeta.subTypes.find((s) => s.toLowerCase().includes('ez'))).toBeUndefined();
+    expect(res.levels.subtype.find((r) => r.value.trim().toLowerCase() === 'retail')).toBeUndefined();
+    expect(sampleMeta.subTypes.find((s) => s.trim().toLowerCase() === 'retail')).toBeUndefined();
     for (const level of LEVELS.filter((l) => l !== 'distributor' && l !== 'chain')) {
       const rows = res.levels[level];
       expect(rows.length).toBeGreaterThan(0);
@@ -368,14 +365,10 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       brands: brandOptions(sampleMeta, sampleMeta.lines[0]).slice(0, 1),
       items: itemOptions(sampleMeta, sampleMeta.lines[0], []).slice(0, 1),
       drill: [{ field: 'SubType' as const, value: 'Chain', label: 'Chain' }],
-      productExposureLevel: 'brand' as const,
-      productExposureView: 'churn' as const,
     };
 
     const hash = serializeHashState(original);
     expect(hash.startsWith('#')).toBe(true);
-    expect(hash).toContain('pel=brand');
-    expect(hash).toContain('pev=churn');
 
     const parsed = parseHashParams(hash);
     expect(parsed.metric).toBe('units');
@@ -386,8 +379,6 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(parsed.likeForLike).toBe(false);
     expect(parsed.txTypes).toEqual(['Sales']);
     expect(parsed.drill).toEqual([{ field: 'SubType', value: 'Chain', label: 'Chain' }]);
-    expect(parsed.productExposureLevel).toBe('brand');
-    expect(parsed.productExposureView).toBe('churn');
 
     const defPeriod = defaultSelection(sampleMeta.availability);
     const validated = validateHashAgainstMeta(parsed, sampleMeta, defPeriod);
@@ -400,8 +391,6 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(validated.period.likeForLike).toBe(false);
     expect(validated.txTypes).toEqual(['Sales']);
     expect(validated.drill).toEqual([{ field: 'SubType', value: 'Chain', label: 'Chain' }]);
-    expect(validated.productExposureLevel).toBe('brand');
-    expect(validated.productExposureView).toBe('churn');
 
     // Multi-line hash round-trip
     if (sampleMeta.lines.length >= 2) {
@@ -420,8 +409,6 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     expect(safeValidated.line).toBeNull();
     expect(safeValidated.lines).toEqual([]);
     expect(safeValidated.metric).toBeUndefined();
-    expect(safeValidated.productExposureLevel).toBeUndefined();
-    expect(safeValidated.productExposureView).toBeUndefined();
     expect(safeValidated.period.cyYear).toBe(defPeriod.cyYear);
     expect(safeValidated.period.quarter).toBe(defPeriod.quarter);
     expect(safeValidated.period.month).toBeNull();
@@ -754,6 +741,60 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     }
   });
 
+  it('17c. Exclude-distributor filtering is additive and excludeDistributors hash state round-trips', () => {
+    const baseline = analyze(sampleDs, baseQuery());
+    const targetDist = sampleMeta.distributors[0];
+    const onlyDist = analyze(sampleDs, baseQuery({ distributors: [targetDist] }));
+    const withoutDist = analyze(sampleDs, baseQuery({ excludeDistributors: [targetDist] }));
+
+    expect(onlyDist.totals.pyQ + withoutDist.totals.pyQ).toBeCloseTo(baseline.totals.pyQ, 6);
+    expect(onlyDist.totals.pyV + withoutDist.totals.pyV).toBeCloseTo(baseline.totals.pyV, 4);
+    expect(onlyDist.totals.cyQ + withoutDist.totals.cyQ).toBeCloseTo(baseline.totals.cyQ, 6);
+    expect(onlyDist.totals.cyV + withoutDist.totals.cyV).toBeCloseTo(baseline.totals.cyV, 4);
+
+    // URL hash round-trip for excludeDistributors=
+    const hash = serializeHashState({
+      metric: 'value',
+      lines: [],
+      period: baseQuery().period,
+      mainTypes: [],
+      excludedDistributors: [targetDist],
+      txTypes: [...TX_TYPES],
+      drill: [],
+    });
+    expect(hash).toContain('excludeDistributors=');
+    const parsed = parseHashParams(hash);
+    expect(parsed.excludedDistributors).toEqual([targetDist]);
+    const validated = validateHashAgainstMeta(parsed, sampleMeta, baseQuery().period);
+    expect(validated.distributors).toEqual([]);
+    expect(validated.excludedDistributors).toEqual([targetDist]);
+
+    // Product-scoped pruning drops out-of-scope excluded distributors and normalizes when all are excluded
+    const item = sampleMeta.products[0][2];
+    const itemDists = distributorOptions(sampleMeta, { items: [item] });
+    const outsideDist = sampleMeta.distributors.find((d) => !itemDists.includes(d));
+    if (outsideDist) {
+      const pruned = validateHashAgainstMeta(
+        { items: [item], excludedDistributors: [itemDists[0], outsideDist] },
+        sampleMeta,
+        baseQuery().period,
+      );
+      expect(pruned.excludedDistributors).toEqual(itemDists.length <= 1 ? [] : [itemDists[0]]);
+    }
+    const allExcluded = validateHashAgainstMeta(
+      { items: [item], excludedDistributors: itemDists },
+      sampleMeta,
+      baseQuery().period,
+    );
+    expect(allExcluded.excludedDistributors).toEqual([]);
+    const allIncluded = validateHashAgainstMeta(
+      { items: [item], distributors: itemDists },
+      sampleMeta,
+      baseQuery().period,
+    );
+    expect(allIncluded.distributors).toEqual([]);
+  });
+
   it('18. WI-2: Sum of LevelTable row Contrib. pp over any full level equals portfolio YoY Growth %', () => {
     const res = analyze(sampleDs, baseQuery());
     for (const m of METRICS) {
@@ -1046,147 +1087,6 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
       }
       expect(sumCellPp).toBeCloseTo(expectedPp, 6);
     }
-  });
-
-  it('24. Enhancement 1: Product × Customer-Segment Exposure Matrix reconciles Σ segments.delta === product.totals.delta across Item, Brand, and Line', () => {
-    const res = analyze(sampleDs, baseQuery());
-    const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
-    const edgeMeta = buildMeta(edgeDs);
-    const edgeRes = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability) }));
-
-    for (const r of [res, edgeRes]) {
-      for (const m of METRICS) {
-        const expByMetric = r.productExposure.byMetric[m];
-        const portfolioTotals = metricPair(r.totals, m);
-
-        for (const lvl of PRODUCT_EXPOSURE_LEVELS) {
-          const list = expByMetric.byLevel[lvl];
-          expect(list.length).toBeGreaterThan(0);
-
-          let levelPy = 0;
-          let levelCy = 0;
-
-          for (const prod of list) {
-            const prodPair = metricPair(prod.totals, m);
-            const prodDelta = prodPair.cy - prodPair.py;
-            levelPy += prodPair.py;
-            levelCy += prodPair.cy;
-
-            let sumSegPy = 0;
-            let sumSegCy = 0;
-            let sumSegDelta = 0;
-            for (const seg of CUSTOMER_SEGMENTS) {
-              const sp = metricPair(prod.segments[seg], m);
-              sumSegPy += sp.py;
-              sumSegCy += sp.cy;
-              sumSegDelta += sp.cy - sp.py;
-            }
-
-            expect(Math.abs(sumSegPy - prodPair.py)).toBeLessThanOrEqual(1e-6);
-            expect(Math.abs(sumSegCy - prodPair.cy)).toBeLessThanOrEqual(1e-6);
-            expect(Math.abs(sumSegDelta - prodDelta)).toBeLessThanOrEqual(1e-6);
-
-            // Signed pp columns sum to product YoY % when product PY != 0, or are null when PY == 0
-            if (isZero(prodPair.py)) {
-              expect(prod.newAcquisitionPp).toBeNull();
-              expect(prod.expansionPp).toBeNull();
-              expect(prod.stablePp).toBeNull();
-              expect(prod.contractionExposurePp).toBeNull();
-              expect(prod.churnExposurePp).toBeNull();
-            } else {
-              const sumPp =
-                (prod.newAcquisitionPp ?? 0) +
-                (prod.expansionPp ?? 0) +
-                (prod.stablePp ?? 0) +
-                (prod.contractionExposurePp ?? 0) +
-                (prod.churnExposurePp ?? 0);
-              const expectedYoyPct = (prodDelta / Math.abs(prodPair.py)) * 100;
-              const tol = Math.max(1e-6, Math.abs(expectedYoyPct) * 1e-9);
-              expect(Math.abs(sumPp - expectedYoyPct)).toBeLessThanOrEqual(tol);
-            }
-          }
-
-          // Sum across all rows at Item / Brand / Line level equals portfolio totals
-          expect(Math.abs(levelPy - portfolioTotals.py)).toBeLessThanOrEqual(1e-4);
-          expect(Math.abs(levelCy - portfolioTotals.cy)).toBeLessThanOrEqual(1e-4);
-        }
-      }
-    }
-  });
-
-  it('25. Enhancement 2: Customer-Behavior Decomposition satisfies new + expansion + contraction + lost === totalDelta and rolls up from Item to Brand/Line', () => {
-    const res = analyze(sampleDs, baseQuery());
-    const edgeDs = datasetFromRows(edgeRows as Record<string, unknown>[]);
-    const edgeMeta = buildMeta(edgeDs);
-    const edgeRes = analyze(edgeDs, baseQuery({ period: defaultSelection(edgeMeta.availability) }));
-
-    for (const r of [res, edgeRes]) {
-      for (const m of METRICS) {
-        const expByMetric = r.productExposure.byMetric[m];
-
-        for (const lvl of PRODUCT_EXPOSURE_LEVELS) {
-          for (const prod of expByMetric.byLevel[lvl]) {
-            const prodPair = metricPair(prod.totals, m);
-            const prodDelta = prodPair.cy - prodPair.py;
-            const cb = prod.customerBehavior;
-
-            const sumEffects =
-              cb.newCustomerEffect +
-              cb.expansionEffect +
-              cb.contractionEffect +
-              cb.lostCustomerEffect;
-
-            expect(Math.abs(sumEffects - cb.totalDelta)).toBeLessThanOrEqual(1e-6);
-            expect(Math.abs(cb.totalDelta - prodDelta)).toBeLessThanOrEqual(1e-6);
-
-            // Bridge waterfall reconciliation: PY + Σ step deltas === CY
-            const wf = buildProductBehaviorWaterfall(prod.totals, cb, m, r.period);
-            expect(wf.length).toBe(6);
-            const wfSum = wf
-              .filter((s) => s.kind !== 'py' && s.kind !== 'cy')
-              .reduce((acc, s) => acc + s.delta, 0);
-            expect(Math.abs(prodPair.py + wfSum - prodPair.cy)).toBeLessThanOrEqual(1e-6);
-          }
-        }
-
-        // Verify Brand and Line effects equal the sum of Item-level effects
-        const itemCbs = expByMetric.byLevel.item.map((x) => x.customerBehavior);
-        const brandCbs = expByMetric.byLevel.brand.map((x) => x.customerBehavior);
-        const lineCbs = expByMetric.byLevel.line.map((x) => x.customerBehavior);
-
-        const sumNew = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.newCustomerEffect, 0);
-        const sumExp = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.expansionEffect, 0);
-        const sumCon = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.contractionEffect, 0);
-        const sumLost = (arr: typeof itemCbs) => arr.reduce((a, x) => a + x.lostCustomerEffect, 0);
-
-        expect(Math.abs(sumNew(brandCbs) - sumNew(itemCbs))).toBeLessThanOrEqual(1e-6);
-        expect(Math.abs(sumExp(brandCbs) - sumExp(itemCbs))).toBeLessThanOrEqual(1e-6);
-        expect(Math.abs(sumCon(brandCbs) - sumCon(itemCbs))).toBeLessThanOrEqual(1e-6);
-        expect(Math.abs(sumLost(brandCbs) - sumLost(itemCbs))).toBeLessThanOrEqual(1e-6);
-
-        expect(Math.abs(sumNew(lineCbs) - sumNew(itemCbs))).toBeLessThanOrEqual(1e-6);
-        expect(Math.abs(sumExp(lineCbs) - sumExp(itemCbs))).toBeLessThanOrEqual(1e-6);
-        expect(Math.abs(sumCon(lineCbs) - sumCon(itemCbs))).toBeLessThanOrEqual(1e-6);
-        expect(Math.abs(sumLost(lineCbs) - sumLost(itemCbs))).toBeLessThanOrEqual(1e-6);
-      }
-    }
-
-    // Direct unit check on decomposeCustomerBehavior
-    const direct = decomposeCustomerBehavior(
-      [
-        { customerId: 'C1', pyQ: 0, pyV: 0, cyQ: 10, cyV: 1000 }, // New: +1000
-        { customerId: 'C2', pyQ: 20, pyV: 2000, cyQ: 35, cyV: 3500 }, // Expansion: +1500
-        { customerId: 'C3', pyQ: 30, pyV: 3000, cyQ: 20, cyV: 2000 }, // Contraction: -1000
-        { customerId: 'C4', pyQ: 15, pyV: 1500, cyQ: 0, cyV: 0 }, // Lost: -1500
-      ],
-      6500,
-      'value',
-    );
-    expect(direct.newCustomerEffect).toBe(1000);
-    expect(direct.expansionEffect).toBe(1500);
-    expect(direct.contractionEffect).toBe(-1000);
-    expect(direct.lostCustomerEffect).toBe(-1500);
-    expect(direct.totalDelta).toBe(0);
   });
 
   it('26. All Qs + All months and All Qs + single month period resolution, FY labels, and 12-month trend buckets', () => {
@@ -1511,7 +1411,21 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
 
     const normMeta = buildMeta(normDs);
     expect(normMeta.subTypes).toEqual(['Chain', 'Private Hospital', 'Stores']);
+    // Ezaby is selectable in Distributor metadata/options while still excluded from levels.distributor
+    expect(normMeta.distributors).toContain('Ezaby');
     const res = analyze(normDs, baseQuery({ period: defaultSelection(normMeta.availability) }));
+    expect(res.filterOptions.distributors).toContain('Ezaby');
+    expect(res.levels.distributor.find((r) => r.value === 'Ezaby')).toBeUndefined();
+
+    const withoutEzaby = analyze(
+      normDs,
+      baseQuery({
+        period: defaultSelection(normMeta.availability),
+        excludeDistributors: ['Ezaby'],
+      }),
+    );
+    expect(withoutEzaby.totals.cyQ).toBeCloseTo(res.totals.cyQ - 20, 6);
+    expect(withoutEzaby.totals.cyV).toBeCloseTo(res.totals.cyV - 2000, 4);
 
     // Ezzaby, Private, and MOH are all absent from SubType level
     expect(res.levels.subtype.find((r) => r.value === 'Ezzaby')).toBeUndefined();
@@ -1555,5 +1469,270 @@ describe('Acceptance tests (Sales Growth Analyzer)', () => {
     // UI level lists exclude distributor
     expect(DRIVER_LEVELS).toEqual(['subtype', 'chain', 'territory', 'item']);
     expect(TABLE_LEVELS).toEqual(['subtype', 'chain', 'territory', 'customer']);
+  });
+
+  it('29. SubType Retail -> Private normalization: case/trim matching, no +N badge, named Chain precedence, Stores+Retail -> Stores, and MainType independence', () => {
+    // Part A: Dataset with ONLY Retail variants (no raw 'Private' rows at all) + Stores+Retail
+    const retailOnlyDs = datasetFromRows([
+      {
+        Date: 202507,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Retail',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-R1',
+        CustomerName: 'Retail Only Cust',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 10,
+        Value: 1000,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: ' retail ',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-R1',
+        CustomerName: 'Retail Only Cust',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 15,
+        Value: 1500,
+      },
+      {
+        Date: 202507,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Stores',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SR0',
+        CustomerName: 'Stores Plus Retail No Raw Private',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 20,
+        Value: 2000,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Retail',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SR0',
+        CustomerName: 'Stores Plus Retail No Raw Private',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 25,
+        Value: 2500,
+      },
+    ]);
+
+    const retailOnlyMeta = buildMeta(retailOnlyDs);
+    expect(retailOnlyMeta.subTypes).toEqual(['Private', 'Stores']);
+    expect(retailOnlyMeta.subTypes.find((s) => s.trim().toLowerCase() === 'retail')).toBeUndefined();
+
+    const retailOnlyRes = analyze(
+      retailOnlyDs,
+      baseQuery({ period: defaultSelection(retailOnlyMeta.availability) }),
+    );
+    expect(retailOnlyRes.levels.subtype.find((r) => r.value.trim().toLowerCase() === 'retail')).toBeUndefined();
+    const r1 = retailOnlyRes.levels.customer.find((c) => c.customerId === 'C-R1')!;
+    expect(r1.subType).toBe('Private');
+    expect(r1.subTypeOthers).toEqual([]);
+    expect(r1.sums).toEqual({ pyQ: 10, pyV: 1000, cyQ: 15, cyV: 1500 });
+
+    const sr0 = retailOnlyRes.levels.customer.find((c) => c.customerId === 'C-SR0')!;
+    expect(sr0.subType).toBe('Stores');
+    expect(sr0.subTypeOthers).toEqual([]);
+    expect(sr0.sums).toEqual({ pyQ: 20, pyV: 2000, cyQ: 25, cyV: 2500 });
+
+    // Part B: Combined dataset testing Private+Retail, Hospital+RETAIL, Retail+named Chain, and Stores+Retail
+    const mixedDs = datasetFromRows([
+      // 1) Customer with Private (PY) and Retail (CY) -> merges into Private with no +1 badge
+      {
+        Date: 202507,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Private',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-PR1',
+        CustomerName: 'Private Then Retail',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 10,
+        Value: 1000,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Retail',
+        Brick: 'Cairo 1',
+        Territory: 'Cairo',
+        Chain: null,
+        CustomerID: 'C-PR1',
+        CustomerName: 'Private Then Retail',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 20,
+        Value: 2000,
+      },
+      // 2) Case/whitespace variant ' RETAIL ' with non-Private MainType='Hospital' -> SubType='Private', MainType preserved
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Hospital',
+        SubType: ' RETAIL ',
+        Brick: 'Giza 1',
+        Territory: 'Giza',
+        Chain: null,
+        CustomerID: 'C-RH1',
+        CustomerName: 'Hospital MainType Retail',
+        Distributor: 'Direct HPG',
+        TransactionType: 'Sales',
+        Quantity: 8,
+        Value: 800,
+      },
+      // 3) Retail row with named Chain='Seif PH' -> Chain takes precedence (SubType='Chain', Chain='Seif PH')
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Retail',
+        Brick: 'Giza 2',
+        Territory: 'Giza',
+        Chain: 'Seif PH',
+        CustomerID: 'C-RC1',
+        CustomerName: 'Retail With Named Chain',
+        Distributor: 'Direct HPG',
+        TransactionType: 'Sales',
+        Quantity: 12,
+        Value: 1200,
+      },
+      // 4) Customer with Stores (PY) and Retail (CY) -> Stores+Private rule normalizes all rows to Stores with no +1 badge
+      {
+        Date: 202507,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Stores',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SR1',
+        CustomerName: 'Stores Plus Retail',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 30,
+        Value: 3000,
+      },
+      {
+        Date: 202607,
+        Line: 'Rota 1',
+        Brand: 'Alpha',
+        Item: 'Alpha 10mg',
+        MainType: 'Private',
+        SubType: 'Retail',
+        Brick: 'Alex 1',
+        Territory: 'Alex',
+        Chain: null,
+        CustomerID: 'C-SR1',
+        CustomerName: 'Stores Plus Retail',
+        Distributor: 'IBNSINA',
+        TransactionType: 'Sales',
+        Quantity: 40,
+        Value: 4000,
+      },
+    ]);
+
+    const mixedMeta = buildMeta(mixedDs);
+    expect(mixedMeta.subTypes).toEqual(['Chain', 'Private', 'Stores']);
+    expect(mixedMeta.subTypes.find((s) => s.trim().toLowerCase() === 'retail')).toBeUndefined();
+    expect(mixedMeta.mainTypes).toEqual(['Hospital', 'Private']);
+    expect(mixedMeta.channels).toContainEqual(['Hospital', 'Private']);
+    expect(mixedMeta.channels.find(([, st]) => st.trim().toLowerCase() === 'retail')).toBeUndefined();
+
+    const mixedRes = analyze(mixedDs, baseQuery({ period: defaultSelection(mixedMeta.availability) }));
+    expect(mixedRes.levels.subtype.find((r) => r.value.trim().toLowerCase() === 'retail')).toBeUndefined();
+
+    // Private+Retail customer merges into Private cleanly without a +N badge
+    const pr1 = mixedRes.levels.customer.find((c) => c.customerId === 'C-PR1')!;
+    expect(pr1.subType).toBe('Private');
+    expect(pr1.subTypeOthers).toEqual([]);
+    expect(pr1.sums).toEqual({ pyQ: 10, pyV: 1000, cyQ: 20, cyV: 2000 });
+
+    // Hospital MainType + ' RETAIL ' normalizes SubType to Private while keeping MainType='Hospital'
+    const rh1 = mixedRes.levels.customer.find((c) => c.customerId === 'C-RH1')!;
+    expect(rh1.subType).toBe('Private');
+    expect(rh1.subTypeOthers).toEqual([]);
+    const hospOnlyRes = analyze(
+      mixedDs,
+      baseQuery({ period: defaultSelection(mixedMeta.availability), mainTypes: ['Hospital'] }),
+    );
+    expect(hospOnlyRes.totals).toEqual({ pyQ: 0, pyV: 0, cyQ: 8, cyV: 800 });
+    expect(hospOnlyRes.levels.subtype.map((r) => r.value)).toEqual(['Private']);
+
+    // Named Chain wins over Retail and reconciles 100% with Chains level
+    const rc1 = mixedRes.levels.customer.find((c) => c.customerId === 'C-RC1')!;
+    expect(rc1.subType).toBe('Chain');
+    expect(rc1.subTypeOthers).toEqual([]);
+    const chainSub = mixedRes.levels.subtype.find((r) => r.value === 'Chain')!;
+    expect(chainSub.sums).toEqual({ pyQ: 0, pyV: 0, cyQ: 12, cyV: 1200 });
+    expect(sumRows(mixedRes.levels.chain)).toEqual(chainSub.sums);
+    expect(mixedRes.levels.chain.find((r) => r.value === 'Seif PH')?.sums).toEqual({
+      pyQ: 0,
+      pyV: 0,
+      cyQ: 12,
+      cyV: 1200,
+    });
+
+    // Stores+Retail normalizes to Stores with no +N badge
+    const sr1 = mixedRes.levels.customer.find((c) => c.customerId === 'C-SR1')!;
+    expect(sr1.subType).toBe('Stores');
+    expect(sr1.subTypeOthers).toEqual([]);
+    const storesSub = mixedRes.levels.subtype.find((r) => r.value === 'Stores')!;
+    expect(storesSub.sums).toEqual({ pyQ: 30, pyV: 3000, cyQ: 40, cyV: 4000 });
+
+    // Private SubType row reconciles with C-PR1 + C-RH1
+    const privateSub = mixedRes.levels.subtype.find((r) => r.value === 'Private')!;
+    expect(privateSub.sums).toEqual({ pyQ: 10, pyV: 1000, cyQ: 28, cyV: 2800 });
+
+    // Every SubType row matches Customer level grouped by subType, and Retail never appears anywhere
+    for (const stRow of mixedRes.levels.subtype) {
+      const custGroupSum = sumRows(mixedRes.levels.customer.filter((c) => c.subType === stRow.value));
+      expect(custGroupSum).toEqual(stRow.sums);
+    }
+    for (const custRow of mixedRes.levels.customer) {
+      expect(custRow.subType?.trim().toLowerCase()).not.toBe('retail');
+      expect(custRow.subTypeOthers?.some((s) => s.trim().toLowerCase() === 'retail')).toBe(false);
+    }
   });
 });

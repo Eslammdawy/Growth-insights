@@ -1,8 +1,8 @@
 # Worklog & Application Status (`worklog.md`)
 
-**Last Updated**: 2026-11-18
+**Last Updated**: 2026-11-19
 **Application**: Sales Growth Analyzer
-**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest acceptance & export tests (`35/35`), and production Vite build (`npm run build`) pass with zero errors.
+**Status**: Healthy — All TypeScript compiler checks (`tsc --noEmit`), Vitest unit, acceptance, export & converter tests (`46/46`), and production Vite build (`npm run build`) pass with zero errors.
 
 ---
 
@@ -128,24 +128,27 @@
 
 | File | Role | Status |
 | :--- | :--- | :--- |
-| `src/lib/config.ts` | Constants (`EXPANDABLE_SUBTYPES = ['Chain']`, `EXCLUDED_DISTRIBUTORS`, `GROWTH_BAND`, `WATERFALL_TOP_N`, `PARETO_TOP_N`, `PRODUCT_EXPOSURE_DEFAULT_LIMIT`, `RETURNS_FLAG_FACTOR`, `RETURNS_MIN_GROSS`) | Updated & Verified |
+| `src/lib/config.ts` | Constants (`EXPANDABLE_SUBTYPES = ['Chain']`, `EXCLUDED_DISTRIBUTORS`, `GROWTH_BAND`, `WATERFALL_TOP_N`, `RETURNS_FLAG_FACTOR`, `RETURNS_MIN_GROSS`) | Updated & Verified |
 | `src/lib/columnar.ts` | Dictionary-encoded `StrColumn` & `Float64Array` `NumColumn` dataset codec + validation | Clean |
 | `src/lib/parse.ts` | Streaming `.xlsx` parser (`fflate` + chunked XML scanner) | Clean |
 | `src/lib/periods.ts` | Quarter/Month period resolution & like-for-like month matching | Clean |
 | `src/lib/palette.ts` | Shared color-blind-safe palette tokens, `growthScaleStyle`, `contribPpScaleStyle`, and `treemapFillColor` | Updated & Verified |
-| `src/lib/metrics.ts` | `Units` & `Value` metric helpers, YoY Growth, `Contrib. %`, PVM, Customer retention/segments, Product Exposure & Customer-Behavior decomposition, and Returns helpers | Updated & Verified |
+| `src/lib/metrics.ts` | `Units` & `Value` metric helpers, YoY Growth, `Contrib. %`, PVM, Customer retention/segments, and Returns helpers | Updated & Verified |
 | `src/lib/insights.ts` | Deterministic headline builder, waterfall builder, driver ranker, and growth concentration metrics | New & Verified |
 | `src/lib/format.ts` | Number, currency (`EGP`), unit price (`fmtPrice`), signed delta, percentage, and `Contrib. %` (`fmtPp`) formatters | Updated & Verified |
-| `src/lib/aggregate.ts` | Single-pass 5-level aggregator (`subtype`, `distributor`, `chain`, `territory`, `customer`), CY item-to-line reallocation, `gross`/`grossTotals`, `customerInsights`, `productExposure`, `insights`, `analyzeItems` | Updated & Verified |
-| `src/lib/hashState.ts` | URL hash serialization (`dlv`, `pel`, `pev`, `ret`, `hmm`), parsing, `DatasetMeta` validation, and `useSyncExternalStore` subscription | Updated & Verified |
-| `src/lib/exportExcel.ts` | Excel (`.xlsx`) export for `LevelTable`, Defector Watchlist (`exportDefectorWatchlistToExcel`), and Product Exposure Matrix (`exportProductExposureToExcel`) | Updated & Verified |
-| `src/lib/acceptance.test.ts` | 29 Vitest acceptance, invariant, Territory×Month, Contribution, PVM, Item reallocation, Chains level, Waterfall, Customer Dynamics, Product Exposure, Customer-Behavior Decomposition, SubType/Chain normalization & Returns tests | 29/29 Passing |
-| `src/lib/exportExcel.test.ts` | 6 Vitest tests verifying `.xlsx` export headers, row calculations, optional returns columns, all-levels export, and product exposure export | 6/6 Passing |
+| `src/lib/aggregate.ts` | Single-pass 5-level aggregator (`subtype`, `distributor`, `chain`, `territory`, `customer`), CY item-to-line reallocation, `excludeDistributors`, `gross`/`grossTotals`, `customerInsights`, `insights`, `analyzeItems` | Updated & Verified |
+| `src/lib/checkboxFilter.ts` | Pure state engine for Excel-style checkbox filters (`ALL_CHECKED`, `resolveCheckboxFilter`, `toggleCheckboxOption`, `selectOnlyCheckboxOption`, `toggleAllCheckboxOptions`, `pruneCheckboxFilter`) | New & Verified |
+| `src/lib/checkboxFilter.test.ts` | 8 Vitest unit tests covering checkbox toggling, `Only`, draft-empty handling, smart `exclude`/`include` display mode, and sticky scope pruning | 8/8 Passing |
+| `src/lib/hashState.ts` | URL hash serialization (`dlv`, `ret`, `hmm`, `excludeDistributors`), parsing, `DatasetMeta` validation, and `useSyncExternalStore` subscription | Updated & Verified |
+| `src/lib/exportExcel.ts` | Excel (`.xlsx`) export for `LevelTable` and Defector Watchlist (`exportDefectorWatchlistToExcel`) | Updated & Verified |
+| `src/lib/acceptance.test.ts` | 29 Vitest acceptance, invariant, Territory×Month, Contribution, PVM, Item reallocation, Chains level, Waterfall, Customer Dynamics, SubType/Chain normalization (`Ezzaby`, `Chain`, `Retail → Private`, `Stores+Private`), Exclude-Distributor & Returns tests | 29/29 Passing |
+| `src/lib/exportExcel.test.ts` | 5 Vitest tests verifying `.xlsx` export headers, row calculations, optional returns columns, and all-levels export | 5/5 Passing |
 | `src/workers/data.worker.ts` | Web Worker hosting dataset, `analyze`, `analyzeItems`, and request cancellation | Verified |
 | `src/workers/workerClient.ts` | Promise RPC wrapper for `data.worker.ts` with abort/cancellation tracking | Verified |
-| `src/store/useDashboardStore.ts` | Zustand store (`driverLevel`, `productExposureLevel`, `productExposureView`, `showReturns`, `heatmapMode`, `customerStatusFilter`, filters, URL hash sync) | Updated & Verified |
+| `src/store/useDashboardStore.ts` | Zustand store (`driverLevel`, `showReturns`, `heatmapMode`, `customerStatusFilter`, `excludedDistributors`, filters, URL hash sync) | Updated & Verified |
 | `src/components/TopBar.tsx` | Header with HPG logo (`public/hpg-logo.jpg`), period banner, Units/Value toggle, period controls, progress bar | Updated & Verified |
-| `src/components/Filters.tsx` | Streamlined 2-step cascading Product Filters bar (`1. Brand` → `2. Item`) + active Line chip with transitions | Updated & Verified |
+| `src/components/CheckboxMultiSelect.tsx` | Shared Excel-style searchable checkbox dropdown with tri-state `Select all`, per-row `Only`, draft-empty handling, and smart `Except`/`N of M` summary | New & Verified |
+| `src/components/Filters.tsx` | Guide Report banner (`Line → Brand → Product` multi-select + Excel-style `Distributor` checkbox filter with smart `Excluding:` / `Distributor:` chips) | Updated & Verified |
 | `src/components/DrillChips.tsx` | Active cross-filter chip bar (`SubType`, `Chain`, `Distributor`, `Territory`, `Brick`, `Customer`, `Item`) | Verified |
 | `src/components/KpiCards.tsx` | 3 KPI summary cards with live monthly CY-vs-PY mini sparklines | Verified |
 | `src/components/KpiInfoTooltip.tsx` | Accessible hover/focus formula & definition popover shared across KPI cards and table headers | New & Verified |
@@ -154,12 +157,13 @@
 | `src/components/GrowthChart.tsx` | Top-10 horizontal YoY bar chart with shared palette, outside-end labels, Chart/Table toggle | Verified |
 | `src/components/BubbleScatterChart.tsx` | Bubble scatter (`x=PY, y=YoY%, size=CY, color=status`) with click-to-drill & Chart/Table toggle | Updated & Verified |
 | `src/components/CyTreemap.tsx` | CY Value Treemap colored by YoY growth from shared palette with click-to-drill & Treemap/Table toggle | Verified |
-| `src/components/CustomerDynamics.tsx` | 4-card retention KPI strip with interactive `KpiInfoTooltip` formula popovers, clickable 5-segment cohort bridge table, and Top-10 Lost Defector Watchlist | Updated & Verified |
-| `src/components/ProductCustomerExposure.tsx` | Product × Customer-Segment Exposure Matrix (`Item` / `Brand` / `Line`) with quick-view chips, proportional segment Δ bars, expandable Customer-Behavior Decomposition waterfall, and `.xlsx` export | New & Verified |
+| `src/components/CustomerDynamics.tsx` | 4-card retention KPI strip with interactive `KpiInfoTooltip` formula popovers, Excel-style `SubType` checkbox filter, clickable 5-segment cohort bridge table, and Top-10 Lost Defector Watchlist | Updated & Verified |
 | `src/components/TableJumpBar.tsx` | Sticky in-page navigation bar (`Filters / Top · Drivers · SubType · Chains · Territory · Customer Dynamics · Customer`) + 4-level `Export All Levels` | Updated & Verified |
 | `src/components/ErrorBoundary.tsx` | React error boundary component with retry support for charts and tables | Verified |
 | `src/components/LevelTable.tsx` | Virtualized 4-level table (`SubType`, `Chains`, `Territory`, `Customer`) with `Contrib. %` diverging bars, `.xlsx` export, optional `Returns %` column & flags, 5-segment customer filter, and filtered subtotal `<tfoot>` | Updated & Verified |
-| `src/pages/Dashboard.tsx` | Main page layout assembling header, product filters, KPIs, `#section-drivers`, primary charts, `#section-insights`, `#section-customer-dynamics` (`CustomerDynamics` + `ProductCustomerExposure`), and 4 stacked level tables | Updated & Verified |
+| `src/pages/Dashboard.tsx` | Main page layout assembling header, product filters, KPIs, `#section-drivers`, primary charts, `#section-insights`, `#section-customer-dynamics` (`CustomerDynamics`), and 4 stacked level tables | Updated & Verified |
+| `scripts/convert.ts` | Streaming `.xlsx` converter with `round4` and `optimizeDataset` (`REQUIRED_COLUMNS`, active `Sales`/`Return Sales` filtering, dictionary compaction, Item-first sort) | Updated & Verified |
+| `scripts/convert.test.ts` | 4 Vitest unit & parity tests covering `round4`, `optimizeDataset`, dictionary compaction, sort order, and fixture parity | New & Verified (4/4 Passing) |
 
 ### 1.12 Inclusive Product Allocation (Counting All Products Regardless of CY Activity) (2026-11-12)
 - **Universal Product Inclusion (`src/lib/aggregate.ts`)**:
@@ -215,16 +219,58 @@
 - **Tests (`src/lib/acceptance.test.ts`)**: Updated test `17b` to verify `itemDistributors`, product-scoped `distributorOptions`, and `matchedRows === 0` for out-of-scope Distributors.
 - README: updated the Guide Report filter description in `README.md` to document the **Distributor** multi-select (`distributors=`, `distributorOptions`, `meta.itemDistributors`).
 
+### 1.20 Checkbox Exclusion Filters for Guide Report Distributor & Customer Dynamics SubType (2026-11-19)
+- **Checkbox Filter Engine & Shared UI (`src/lib/checkboxFilter.ts`, `src/components/CheckboxMultiSelect.tsx`)**:
+  - Built pure state engine `src/lib/checkboxFilter.ts` supporting `exclude` vs `include` intent (`ALL_CHECKED`, `resolveCheckboxFilter`, `toggleCheckboxOption`, `selectOnlyCheckboxOption`, `toggleAllCheckboxOptions`, `reincludeCheckboxOption`, `removeIncludedCheckboxOption`, `pruneCheckboxFilter`, `isSameCheckboxFilterState`, `summarizeNames`).
+  - Built `src/components/CheckboxMultiSelect.tsx` with all options checked by default, instant apply on click, a master tri-state `Select all` / `Unselect all` row, search box, per-row **Only** quick button, local **draft-empty** guard when unchecking all boxes (restores previous filter on close if none re-checked), and smart **Except ...** vs **N of M** trigger summaries (`displayMode`).
+- **Include `Ezaby` & Transaction-Level Exclusion (`src/lib/aggregate.ts`, `src/lib/hashState.ts`, `src/store/useDashboardStore.ts`)**:
+  - Updated `buildMeta` and `analyze` `filterOptions.distributors` in `src/lib/aggregate.ts` to include all dataset Distributors (including `Ezaby`), while keeping `EXCLUDED_DISTRIBUTORS` filtering on `levels.distributor` and `analyzeAllLevelsItems`.
+  - Added `excludeDistributors?: string[]` and `excludeMask(...)` to `AnalysisQuery` / `buildContext`, `excludedDistributors` + `setDistributorFilter` + intent-preserving `pruneDistributorSelection` in `src/store/useDashboardStore.ts`, and `excludeDistributors=` serialization/validation in `src/lib/hashState.ts`.
+- **Guide Report Distributor & Customer Dynamics SubType (`src/components/Filters.tsx`, `src/components/CustomerDynamics.tsx`)**:
+  - Switched **Distributor** in `src/components/Filters.tsx` to `CheckboxMultiSelect` with smart `Excluding:` (re-include on click) vs `Distributor:` chips, leaving `Line`, `Brand`, and `Product` (`SearchableMultiSelect`) unchanged.
+  - Switched local **SubType** in `src/components/CustomerDynamics.tsx` to `CheckboxMultiSelect` with intent-preserving pruning across global filter changes and smart `Excluding SubType:` vs `Filtered by SubType:` notice banners.
+- **Tests (`src/lib/checkboxFilter.test.ts`, `src/lib/acceptance.test.ts`)**:
+  - Added 8 unit tests in `src/lib/checkboxFilter.test.ts` and test `17c` + `Ezaby` metadata/exclusion assertions in test `28` of `src/lib/acceptance.test.ts`.
+- README: updated Guide Report Distributor, Customer Dynamics SubType, URL hash parameter list, and test count in `README.md`.
+
+### 1.21 Removal of Product × Customer-Segment Exposure Section (2026-11-19)
+- **UI & Dashboard Removal (`src/pages/Dashboard.tsx`)**:
+  - Deleted `src/components/ProductCustomerExposure.tsx` and removed its lazy mount from `#section-customer-dynamics` in `src/pages/Dashboard.tsx`, keeping `CustomerDynamics.tsx` and shared `KpiInfoTooltip.tsx` intact.
+- **Aggregation, Metrics, Export & State Cleanup (`src/lib/aggregate.ts`, `src/lib/metrics.ts`, `src/lib/config.ts`, `src/lib/exportExcel.ts`, `src/lib/hashState.ts`, `src/store/useDashboardStore.ts`)**:
+  - Removed the `Item × Customer` accumulator (`itemCustMap`), `buildProductExposure`, `buildProductExposureForMetric`, `emptySegmentMap`, and `AnalysisResult.productExposure` from `src/lib/aggregate.ts` so `analyze()` no longer computes unused exposure matrices on every filter change.
+  - Removed `ProductExposureLevel`, `PRODUCT_EXPOSURE_LEVELS`, `PRODUCT_EXPOSURE_LEVEL_LABEL`, `CustomerBehaviorRow`, `decomposeCustomerBehavior`, `mergeCustomerBehaviorRows`, `ProductSegmentBreakdown`, `ProductExposureByMetric`, `ProductExposure`, `buildProductSegmentBreakdown`, `ProductBehaviorWaterfallStep`, and `buildProductBehaviorWaterfall` from `src/lib/metrics.ts`.
+  - Removed unused `PARETO_TOP_N` and `PRODUCT_EXPOSURE_DEFAULT_LIMIT` from `src/lib/config.ts`, `ExportProductExposureOptions` and `exportProductExposureToExcel` from `src/lib/exportExcel.ts`, `pel`/`pev` hash parameters (`ProductExposureView`, `PRODUCT_EXPOSURE_VIEWS`) from `src/lib/hashState.ts`, and `productExposureLevel`/`productExposureView` state & setters from `src/store/useDashboardStore.ts`.
+- **Tests (`src/lib/acceptance.test.ts`, `src/lib/exportExcel.test.ts`)**:
+  - Removed Product Exposure / Customer-Behavior Decomposition tests `24` and `25` and `pel`/`pev` round-trip assertions from `src/lib/acceptance.test.ts`, and removed the `exportProductExposureToExcel` test from `src/lib/exportExcel.test.ts`.
+- README: updated Metrics, Customer Dynamics, Lazy Loading, URL hash parameters, and test count in `README.md`.
+
+### 1.22 Converter Size Optimization — Required Columns, Active Rows, 4-Decimal Rounding & Item-First Sort (2026-11-19)
+- **Column & Row Filtering (`scripts/convert.ts`)**:
+  - Updated `scripts/convert.ts` to read strictly the 15 `REQUIRED_COLUMNS` (dropping all 14 unused columns such as `CustomerAddress`, `CustomerIDName`, and constant flag columns) while keeping the existing `sga-columnar` v1 `.json.gz` schema and leaving `src/lib/aggregate.ts` and `src/workers/data.worker.ts` untouched.
+  - Added `round4` and `optimizeDataset` in `scripts/convert.ts` to drop unsupported `Bonus` / `Return Bonus` rows (23,266 of 924,963 rows) while preserving all 901,697 active `Sales` + `Return Sales` rows intact (preserving exact `matchedRows`), compact unused dictionary entries while preserving `dict[0] === ''`, round `Quantity` and `Value` to 4 decimal places, and sort rows Item-first (`Date` → `TransactionType` → `Line` → `Brand` → `Item` → ... → `Quantity`) for gzip compression locality.
+- **Measured Size & Payload Reduction (`public/data/sales.json.gz`)**:
+  - Reduced `public/data/sales.json.gz` from **20.42 MiB (21,408,993 bytes)** down to **5.64 MiB (5,908,753 bytes)** (−72.4%) and uncompressed JSON from **93.30 MiB** down to **48.04 MiB (50,368,563 bytes)** (−48.5%), trimming Worker JSON parse work and memory footprint with negligible rounding drift (< 0.6 units and < 0.8 EGP across 632.75M EGP net sales).
+- **Tests (`scripts/convert.test.ts`)**:
+  - Added 4 Vitest unit & fixture-parity tests in `scripts/convert.test.ts` verifying `round4`, column stripping, active-row filtering, dictionary compaction, Item-first deterministic sort order, `DataError('empty')` guard, and `edge-cases.json` / `sample.json` round-trip parity.
+- **Files Touched**: `scripts/convert.ts`, `scripts/convert.test.ts`, `README.md`, `worklog.md`.
+
+### 1.23 SubType Normalization — Retail → Private (2026-11-19)
+- **Runtime `Retail → Private` Normalization (`src/lib/aggregate.ts`)**:
+  - Added rule 3 in `prepare(ds)` mapping non-chain `SubType = 'Retail'` (exact case-insensitive trimmed match, across all `MainType` values) to canonical `'Private'` before `Stores + Private → Stores` and `computeCustomers`, while keeping `Ezzaby` and named `Chain` precedence intact.
+  - Removes `'Retail'` completely from `meta.subTypes`, `levels.subtype`, Customer Dynamics filters, charts, Growth Drivers, Excel exports, and the Customer table's `+N` historical tooltip badge (`subTypeOthers`), and causes `Stores + Retail` customers to normalize cleanly to `Stores`.
+- **Tests & Live Verification (`src/lib/acceptance.test.ts`, `public/data/sales.json.gz`)**:
+  - Updated test `1` and added test `29` in `src/lib/acceptance.test.ts` verifying no-raw-`Private` datasets, `Private + Retail` badge elimination, `MainType` independence, named `Chain` precedence, `Stores + Retail → Stores`, and full `SubType`/`Customer` reconciliation.
+  - Verified against `public/data/sales.json.gz`: `'Retail'` is absent from `meta.subTypes` and `levels.subtype` (19 SubTypes), and all 3 previously-`Retail` customers normalize to `Private` with `subTypeOthers = []`.
+- **Files Touched**: `src/lib/aggregate.ts`, `src/lib/acceptance.test.ts`, `README.md`, `worklog.md`.
+
 ---
 
 ## 3. Verification Results & Bundle Size Deltas
 
 - **TypeScript Check (`npm run typecheck`)**: Passed (`0` errors).
-- **Automated Tests (`npm test`)**: Passed (`35/35` tests across `src/lib/acceptance.test.ts` (29 tests) and `src/lib/exportExcel.test.ts` (6 tests)).
-- **Production Build (`npm run build`)**: Passed cleanly in `5.59s` with zero new runtime dependencies. Lazy-loaded chunk sizes:
-  - `GrowthDrivers-*.js`: `22.40 kB` (`6.75 kB` gzip)
-  - `CustomerDynamics-*.js`: `23.96 kB` (`6.21 kB` gzip)
-  - `ProductCustomerExposure-*.js`: `28.26 kB` (`7.51 kB` gzip)
-  - `KpiInfoTooltip-*.js`: `2.52 kB` (`1.11 kB` gzip)
+- **Automated Tests (`npm test`)**: Passed (`46/46` tests across `src/lib/checkboxFilter.test.ts` (8 tests), `src/lib/acceptance.test.ts` (29 tests), `src/lib/exportExcel.test.ts` (5 tests), and `scripts/convert.test.ts` (4 tests)).
+- **Production Build (`npm run build`)**: Passed cleanly in `5.47s` with zero new runtime dependencies. `public/data/sales.json.gz` remains `5.64 MiB` (`5,908,753 bytes`). Lazy-loaded chunk sizes:
+  - `GrowthDrivers-*.js`: `22.37 kB` (`6.73 kB` gzip)
+  - `CustomerDynamics-*.js`: `26.52 kB` (`6.75 kB` gzip)
   - `MonthChart-*.js`: `43.25 kB` (`10.89 kB` gzip)
-  - `data.worker-*.js`: `44.85 kB`
+  - `data.worker-*.js`: `41.71 kB`

@@ -2,7 +2,14 @@ import React, { useMemo, useTransition } from 'react';
 import { ArrowRight, Compass, RotateCcw, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { brandOptions, distributorOptions, itemOptions } from '../lib/aggregate';
+import {
+  CheckboxFilterState,
+  reincludeCheckboxOption,
+  removeIncludedCheckboxOption,
+  resolveCheckboxFilter,
+} from '../lib/checkboxFilter';
 import { useDashboardStore } from '../store/useDashboardStore';
+import { CheckboxMultiSelect } from './CheckboxMultiSelect';
 import { SearchableMultiSelect } from './SearchableMultiSelect';
 
 export const Filters: React.FC = () => {
@@ -16,7 +23,8 @@ export const Filters: React.FC = () => {
     items,
     setItems,
     distributors,
-    setDistributors,
+    excludedDistributors,
+    setDistributorFilter,
     drill,
     resetFilters,
   } = useDashboardStore(
@@ -29,7 +37,8 @@ export const Filters: React.FC = () => {
       items: s.items,
       setItems: s.setItems,
       distributors: s.distributors,
-      setDistributors: s.setDistributors,
+      excludedDistributors: s.excludedDistributors,
+      setDistributorFilter: s.setDistributorFilter,
       drill: s.drill,
       resetFilters: s.resetFilters,
     }))
@@ -49,8 +58,25 @@ export const Filters: React.FC = () => {
     [meta, lines, brands, items]
   );
 
+  const distributorFilter: CheckboxFilterState = useMemo(
+    () =>
+      distributors.length > 0
+        ? { mode: 'include', values: distributors }
+        : { mode: 'exclude', values: excludedDistributors },
+    [distributors, excludedDistributors]
+  );
+  const distResolved = useMemo(
+    () => resolveCheckboxFilter(distributorFilter, availableDistributors),
+    [distributorFilter, availableDistributors]
+  );
+  const distributorChipCount = !distResolved.isActive
+    ? 0
+    : distResolved.displayMode === 'exclude'
+      ? distResolved.excluded.length
+      : distResolved.checked.length;
+
   const activeFilterCount =
-    lines.length + brands.length + items.length + distributors.length + drill.length;
+    lines.length + brands.length + items.length + distributorChipCount + drill.length;
   const productScopeBadge =
     items.length > 0
       ? `In ${items.length} Product${items.length > 1 ? 's' : ''}`
@@ -128,12 +154,12 @@ export const Filters: React.FC = () => {
             <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-200">
               Distributor
             </span>
-            <SearchableMultiSelect
+            <CheckboxMultiSelect
               label="Distributor"
               scopeBadge={productScopeBadge}
               options={availableDistributors}
-              selected={distributors}
-              onChange={(next) => startTransition(() => setDistributors(next))}
+              value={distributorFilter}
+              onChange={(next) => startTransition(() => setDistributorFilter(next))}
               placeholder="All Distributors"
               accent="emerald"
             />
@@ -191,22 +217,53 @@ export const Filters: React.FC = () => {
                 </button>
               </span>
             ))}
-            {distributors.map((d) => (
-              <span
-                key={`d-${d}`}
-                className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-900 dark:text-emerald-200"
-              >
-                Distributor: <span className="max-w-[120px] truncate">{d}</span>
-                <button
-                  type="button"
-                  onClick={() => startTransition(() => setDistributors(distributors.filter((x) => x !== d)))}
-                  aria-label={`Remove Distributor ${d}`}
-                  className="rounded-full p-0.5 hover:bg-emerald-500/20"
+            {distResolved.displayMode === 'exclude' &&
+              distResolved.excluded.map((d) => (
+                <span
+                  key={`dx-${d}`}
+                  title={`Excluded Distributor: ${d}`}
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:text-amber-200"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
+                  Excluding: <span className="max-w-[120px] truncate">{d}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      startTransition(() =>
+                        setDistributorFilter(
+                          reincludeCheckboxOption(distributorFilter, availableDistributors, d)
+                        )
+                      )
+                    }
+                    aria-label={`Re-include Distributor ${d}`}
+                    className="rounded-full p-0.5 hover:bg-amber-500/20"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            {distResolved.displayMode === 'include' &&
+              distResolved.checked.map((d) => (
+                <span
+                  key={`d-${d}`}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-900 dark:text-emerald-200"
+                >
+                  Distributor: <span className="max-w-[120px] truncate">{d}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      startTransition(() =>
+                        setDistributorFilter(
+                          removeIncludedCheckboxOption(distributorFilter, availableDistributors, d)
+                        )
+                      )
+                    }
+                    aria-label={`Remove Distributor ${d}`}
+                    className="rounded-full p-0.5 hover:bg-emerald-500/20"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
 
             <button
               type="button"

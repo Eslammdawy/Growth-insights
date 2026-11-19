@@ -1,10 +1,9 @@
 import { DatasetMeta, DrillChip, InsightLevel, brandOptions, distributorOptions, itemOptions, subTypeOptions } from './aggregate';
-import { METRICS, Metric, PRODUCT_EXPOSURE_LEVELS, ProductExposureLevel } from './metrics';
+import { pruneCheckboxFilter } from './checkboxFilter';
+import { METRICS, Metric } from './metrics';
 import { PeriodSelection, quarterMonths } from './periods';
 
 export type HeatmapMode = 'yoy' | 'pp';
-export type ProductExposureView = 'all' | 'churn' | 'new';
-export const PRODUCT_EXPOSURE_VIEWS: readonly ProductExposureView[] = ['all', 'churn', 'new'];
 const VALID_DRIVER_LEVELS: readonly InsightLevel[] = ['subtype', 'chain', 'territory', 'item'];
 
 export interface ParsedHashState {
@@ -20,12 +19,11 @@ export interface ParsedHashState {
   mainTypes?: string[];
   subTypes?: string[];
   distributors?: string[];
+  excludedDistributors?: string[];
   territories?: string[];
   txTypes?: ('Sales' | 'Return Sales')[];
   drill?: DrillChip[];
   driverLevel?: InsightLevel;
-  productExposureLevel?: ProductExposureLevel;
-  productExposureView?: ProductExposureView;
   showReturns?: boolean;
   heatmapMode?: HeatmapMode;
 }
@@ -111,6 +109,11 @@ export function parseHashParams(hashString: string): ParsedHashState {
     if (d) out.distributors = d.split(',').filter(Boolean);
   }
 
+  if (params.has('excludeDistributors')) {
+    const d = params.get('excludeDistributors')!;
+    if (d) out.excludedDistributors = d.split(',').filter(Boolean);
+  }
+
   if (params.has('territories')) {
     const tr = params.get('territories')!;
     if (tr) out.territories = tr.split(',').filter(Boolean);
@@ -152,16 +155,6 @@ export function parseHashParams(hashString: string): ParsedHashState {
     if (VALID_DRIVER_LEVELS.includes(dlv)) out.driverLevel = dlv;
   }
 
-  if (params.has('pel')) {
-    const pel = params.get('pel') as ProductExposureLevel;
-    if (PRODUCT_EXPOSURE_LEVELS.includes(pel)) out.productExposureLevel = pel;
-  }
-
-  if (params.has('pev')) {
-    const pev = params.get('pev') as ProductExposureView;
-    if (PRODUCT_EXPOSURE_VIEWS.includes(pev)) out.productExposureView = pev;
-  }
-
   if (params.has('ret')) {
     const ret = params.get('ret');
     out.showReturns = ret === '1' || ret === 'true';
@@ -187,14 +180,13 @@ export function validateHashAgainstMeta(
   mainTypes: string[];
   subTypes: string[];
   distributors: string[];
+  excludedDistributors: string[];
   territories: string[];
   txTypes: ('Sales' | 'Return Sales')[];
   brands: string[];
   items: string[];
   drill: DrillChip[];
   driverLevel?: InsightLevel;
-  productExposureLevel?: ProductExposureLevel;
-  productExposureView?: ProductExposureView;
   showReturns?: boolean;
   heatmapMode?: HeatmapMode;
 } {
@@ -260,9 +252,18 @@ export function validateHashAgainstMeta(
     : [];
 
   const availableDistributors = distributorOptions(meta, { lines, brands, items });
-  const distributors = parsed.distributors
-    ? parsed.distributors.filter((d) => availableDistributors.includes(d))
-    : [];
+  const distributorsPruned = parsed.distributors?.length
+    ? pruneCheckboxFilter({ mode: 'include', values: parsed.distributors }, availableDistributors)
+    : null;
+  const distributors =
+    distributorsPruned?.mode === 'include' ? distributorsPruned.values : [];
+  const excludedDistributors =
+    parsed.distributors?.length || !parsed.excludedDistributors?.length
+      ? []
+      : pruneCheckboxFilter(
+          { mode: 'exclude', values: parsed.excludedDistributors },
+          availableDistributors,
+        ).values;
 
   const validDrillFields = new Set(['SubType', 'Chain', 'Distributor', 'Territory', 'Brick', 'Customer', 'CustomerID', 'Item']);
   const drill = (parsed.drill ?? []).filter((c) => validDrillFields.has(c.field));
@@ -275,14 +276,13 @@ export function validateHashAgainstMeta(
     mainTypes,
     subTypes,
     distributors,
+    excludedDistributors,
     territories,
     txTypes,
     brands,
     items,
     drill,
     driverLevel: parsed.driverLevel,
-    productExposureLevel: parsed.productExposureLevel,
-    productExposureView: parsed.productExposureView,
     showReturns: parsed.showReturns,
     heatmapMode: parsed.heatmapMode,
   };
@@ -296,14 +296,13 @@ export function serializeHashState(state: {
   mainTypes: string[];
   subTypes?: string[];
   distributors?: string[];
+  excludedDistributors?: string[];
   territories?: string[];
   txTypes: ('Sales' | 'Return Sales')[];
   brands?: string[];
   items?: string[];
   drill: DrillChip[];
   driverLevel?: InsightLevel;
-  productExposureLevel?: ProductExposureLevel;
-  productExposureView?: ProductExposureView;
   showReturns?: boolean;
   heatmapMode?: HeatmapMode;
 }): string {
@@ -332,6 +331,8 @@ export function serializeHashState(state: {
   }
   if (state.distributors && state.distributors.length > 0) {
     params.set('distributors', state.distributors.join(','));
+  } else if (state.excludedDistributors && state.excludedDistributors.length > 0) {
+    params.set('excludeDistributors', state.excludedDistributors.join(','));
   }
   if (state.territories && state.territories.length > 0) {
     params.set('territories', state.territories.join(','));
@@ -350,12 +351,6 @@ export function serializeHashState(state: {
   }
   if (state.driverLevel && state.driverLevel !== 'subtype') {
     params.set('dlv', state.driverLevel);
-  }
-  if (state.productExposureLevel && state.productExposureLevel !== 'item') {
-    params.set('pel', state.productExposureLevel);
-  }
-  if (state.productExposureView && state.productExposureView !== 'all') {
-    params.set('pev', state.productExposureView);
   }
   if (state.showReturns) {
     params.set('ret', '1');

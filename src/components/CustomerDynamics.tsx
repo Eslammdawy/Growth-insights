@@ -31,9 +31,17 @@ import {
   isZero,
   metricPair,
 } from '../lib/metrics';
+import {
+  ALL_CHECKED,
+  CheckboxFilterState,
+  isSameCheckboxFilterState,
+  pruneCheckboxFilter,
+  resolveCheckboxFilter,
+  summarizeNames,
+} from '../lib/checkboxFilter';
 import { StatusFilter, useDashboardStore } from '../store/useDashboardStore';
+import { CheckboxMultiSelect } from './CheckboxMultiSelect';
 import { KpiInfoTooltip } from './KpiInfoTooltip';
-import { SearchableMultiSelect } from './SearchableMultiSelect';
 
 const SEGMENT_BADGE: Record<CustomerSegment, string> = {
   new: 'bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-300',
@@ -49,7 +57,7 @@ const SEGMENT_BADGE: Record<CustomerSegment, string> = {
 export const CustomerDynamics: React.FC = () => {
   const [, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
-  const [selectedSubTypes, setSelectedSubTypes] = useState<string[]>([]);
+  const [subTypeFilter, setSubTypeFilter] = useState<CheckboxFilterState>(ALL_CHECKED);
   const [expandedDefectors, setExpandedDefectors] = useState<Set<string>>(() => new Set());
   const targets = useRef(new Map<string, ItemTarget>());
 
@@ -134,22 +142,26 @@ export const CustomerDynamics: React.FC = () => {
     [subTypeCounts]
   );
 
-  // Drop selected SubTypes that are no longer available
+  // Preserve exclude/include intent when global filters change the available SubTypes
   useEffect(() => {
-    if (selectedSubTypes.length === 0) return;
-    const valid = selectedSubTypes.filter((s) => subTypeCounts[s] !== undefined);
-    if (valid.length !== selectedSubTypes.length) setSelectedSubTypes(valid);
-  }, [subTypeCounts, selectedSubTypes]);
+    setSubTypeFilter((prev) => {
+      const next = pruneCheckboxFilter(prev, subTypeOptions);
+      return isSameCheckboxFilterState(prev, next) ? prev : next;
+    });
+  }, [subTypeOptions]);
+
+  const subTypeResolved = useMemo(
+    () => resolveCheckboxFilter(subTypeFilter, subTypeOptions),
+    [subTypeFilter, subTypeOptions]
+  );
 
   /** True when the local SubType filter actually narrows the customer list. */
-  const subTypeFilterActive =
-    selectedSubTypes.length > 0 && selectedSubTypes.length < subTypeOptions.length;
+  const subTypeFilterActive = subTypeResolved.isActive;
 
   const filteredCustomerRows = useMemo(() => {
     if (!subTypeFilterActive) return customerRows;
-    const sel = new Set(selectedSubTypes);
-    return customerRows.filter((r) => sel.has(r.subType || 'Unassigned'));
-  }, [customerRows, selectedSubTypes, subTypeFilterActive]);
+    return customerRows.filter((r) => subTypeResolved.checkedSet.has(r.subType || 'Unassigned'));
+  }, [customerRows, subTypeResolved, subTypeFilterActive]);
 
   const ci = useMemo(() => {
     if (!result) return null;
@@ -169,10 +181,14 @@ export const CustomerDynamics: React.FC = () => {
     }, 0);
   }, [result, subTypeFilterActive, filteredCustomerRows, metric]);
 
-  const subTypeSummary = useMemo(() => {
-    if (selectedSubTypes.length <= 2) return selectedSubTypes.join(', ');
-    return `${selectedSubTypes.slice(0, 2).join(', ')} +${selectedSubTypes.length - 2} more`;
-  }, [selectedSubTypes]);
+  const subTypeNoticeList =
+    subTypeResolved.displayMode === 'exclude'
+      ? subTypeResolved.excluded
+      : subTypeResolved.checked;
+  const subTypeSummary = useMemo(
+    () => summarizeNames(subTypeNoticeList, 2),
+    [subTypeNoticeList]
+  );
 
   const defectors = useMemo(() => {
     if (!result) return [];
@@ -258,19 +274,20 @@ export const CustomerDynamics: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* SubType Filter (local multi-select, matches each customer's primary SubType) */}
+          {/* SubType Filter (local checkbox filter, matches each customer's primary SubType) */}
           <div className="flex items-center gap-1.5">
             <Filter className="h-3.5 w-3.5 text-fuchsia-600 dark:text-fuchsia-400 shrink-0" />
-            <SearchableMultiSelect
+            <CheckboxMultiSelect
               label="SubType"
               scopeBadge="Customer Dynamics"
               options={subTypeOptions}
-              selected={selectedSubTypes}
-              onChange={setSelectedSubTypes}
+              value={subTypeFilter}
+              onChange={setSubTypeFilter}
               placeholder="All SubTypes"
               placeholderCount={customerRows.length}
               optionCounts={subTypeCounts}
               accent="fuchsia"
+              align="right"
               ariaLabel="Filter customer dynamics by SubType"
             />
           </div>
@@ -295,7 +312,13 @@ export const CustomerDynamics: React.FC = () => {
       </div>
 
       <p className="sr-only">
-        Customer dynamics for {METRIC_LABEL[metric]}{subTypeFilterActive ? ` (SubType: ${selectedSubTypes.join(', ')})` : ''}: Active customers PY {ci.active.pyCount} to CY {ci.active.cyCount}.
+        Customer dynamics for {METRIC_LABEL[metric]}
+        {subTypeFilterActive
+          ? subTypeResolved.displayMode === 'exclude'
+            ? ` (Excluding SubType: ${subTypeResolved.excluded.join(', ')})`
+            : ` (SubType: ${subTypeResolved.checked.join(', ')})`
+          : ''}
+        : Active customers PY {ci.active.pyCount} to CY {ci.active.cyCount}.
         Retained Growth Share {fmtPct(ci.retainedGrowthShare, true)}, New Customer Growth Share {fmtPct(ci.newGrowthShare, true)}.
       </p>
 
@@ -305,10 +328,14 @@ export const CustomerDynamics: React.FC = () => {
           {subTypeFilterActive && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-fuchsia-200/80 bg-fuchsia-50/70 px-3 py-1.5 text-xs text-fuchsia-950 dark:border-fuchsia-900/50 dark:bg-fuchsia-950/30 dark:text-fuchsia-200">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-semibold text-slate-600 dark:text-slate-400">Filtered by SubType:</span>
+                <span className="font-semibold text-slate-600 dark:text-slate-400">
+                  {subTypeResolved.displayMode === 'exclude'
+                    ? 'Excluding SubType:'
+                    : 'Filtered by SubType:'}
+                </span>
                 <span
                   className="rounded-lg bg-fuchsia-500/15 px-2 py-0.5 font-extrabold text-fuchsia-700 dark:text-fuchsia-300"
-                  title={selectedSubTypes.join(', ')}
+                  title={subTypeNoticeList.join(', ')}
                 >
                   {subTypeSummary}
                 </span>
@@ -318,7 +345,7 @@ export const CustomerDynamics: React.FC = () => {
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedSubTypes([])}
+                onClick={() => setSubTypeFilter(ALL_CHECKED)}
                 className="inline-flex items-center gap-1 text-xs font-bold text-fuchsia-700 hover:underline dark:text-fuchsia-300"
               >
                 <X className="h-3 w-3" />
@@ -331,12 +358,18 @@ export const CustomerDynamics: React.FC = () => {
             <div className="flex h-44 flex-col items-center justify-center rounded-xl border border-slate-200/70 p-6 text-center dark:border-slate-800/80">
               <Users className="h-7 w-7 text-slate-400 dark:text-slate-500" />
               <p className="mt-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                No customer activity matches the current filters{subTypeFilterActive ? ` for SubType "${subTypeSummary}"` : ''}.
+                No customer activity matches the current filters
+                {subTypeFilterActive
+                  ? subTypeResolved.displayMode === 'exclude'
+                    ? ` when excluding SubType "${subTypeSummary}"`
+                    : ` for SubType "${subTypeSummary}"`
+                  : ''}
+                .
               </p>
               {subTypeFilterActive ? (
                 <button
                   type="button"
-                  onClick={() => setSelectedSubTypes([])}
+                  onClick={() => setSubTypeFilter(ALL_CHECKED)}
                   className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-fuchsia-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-fuchsia-500"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />

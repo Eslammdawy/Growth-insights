@@ -4,20 +4,21 @@ Client-side analytical dashboard for **HPG (Hefny Pharma Group)** that measures 
 
 ## Architecture & Data Loading
 
-The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xlsx`) contains **494,242 rows** across 29 columns (~415 MB of uncompressed worksheet XML). To make loading and interactive slicing instantaneous:
+The production workbooks (`HPG Sales_SalesPerDistributor Py 2025.xlsx` and `HPG Sales_SalesPerDistributor Cy 2026.xlsx`) contain **924,963 raw rows** across PY 2025 and CY 2026 (**901,697 active `Sales` + `Return Sales` rows**). To keep the payload small and interactive slicing instantaneous:
 
 1. **Node Streaming Converter (`npm run convert`)**:
-   - Reads the `.xlsx` central directory via random access, inflates `xl/sharedStrings.xml` and the first worksheet incrementally with `fflate`, and scans rows chunk-by-chunk without loading the full XML into memory.
-   - Dictionary-encodes string columns (`dict` + `Int32Array` codes) and stores numeric columns (`Date`, `Quantity`, `Value`) as `Float64Array`, writing `public/data/sales.json.gz` (~11 MB, git-ignored).
+   - Reads each `.xlsx` central directory via random access, inflates `xl/sharedStrings.xml` and the first worksheet incrementally with `fflate`, and scans rows chunk-by-chunk without loading the full XML into memory.
+   - Filters columns to the 15 `REQUIRED_COLUMNS` (dropping the 14 unused columns), prints raw per-year/type validation totals, then runs `optimizeDataset` to exclude unsupported transaction types (`Bonus` / `Return Bonus`), round `Quantity` and `Value` to 4 decimal places (`round4`), sort rows Item-first for gzip locality, and compact unused dictionary entries while preserving `dict[0] === ''`.
+   - Dictionary-encodes string columns (`dict` + `Int32Array` codes) and stores numeric columns (`Date`, `Quantity`, `Value`) as `Float64Array`, writing `public/data/sales.json.gz` (**5.64 MiB / 5.91 MB**, git-ignored).
 2. **In-Browser Web Worker (`src/workers/data.worker.ts`)**:
    - Automatically fetches `./data/sales.json.gz` on startup, decompresses via `DecompressionStream` (with `fflate` fallback), and builds typed-array indexes in memory.
-   - **Single-Pass Multi-Level Aggregation (`src/lib/aggregate.ts`)**: computes net and gross totals, monthly trends, Territory × Month matrix, 4 dashboard table levels (`SubType`, `Chains`, `Territory`, `Customer`), Customer Dynamics cohorts/retention, and Contribution-to-Growth & Price/Volume/Mix decomposition simultaneously in a single typed-array pass (~15–20 ms across 494k rows).
+   - **Single-Pass Multi-Level Aggregation (`src/lib/aggregate.ts`)**: computes net and gross totals, monthly trends, Territory × Month matrix, 4 dashboard table levels (`SubType`, `Chains`, `Territory`, `Customer`), Customer Dynamics cohorts/retention, and Contribution-to-Growth & Price/Volume/Mix decomposition simultaneously in a single typed-array pass across the 901k active rows.
    - **Superseded Request Cancellation**: Aborts superseded analysis requests on rapid filter changes, skipping worker execution and discarding outdated calculations.
    - **On-Demand Item Breakdown (`analyzeItems`)**: lazily computes per-item breakdowns (including gross sales and returns) inside the Web Worker whenever any table row, `Chain` child row, or Defector Watchlist row is expanded.
 
 ## Metrics & YoY Growth Definitions
 
-- **Supported Transaction Types**: Only `Sales` and `Return Sales` are included (default: both selected = Net Sales). `Bonus` and `Return Bonus` rows are kept in the parsed dataset but always excluded from all metric and customer-attribute calculations.
+- **Supported Transaction Types**: Only `Sales` and `Return Sales` are included (default: both selected = Net Sales). `npm run convert` strips `Bonus` and `Return Bonus` rows before writing `public/data/sales.json.gz`, while `aggregate.ts` still defensively excludes them for raw or test datasets.
 - **Primary Metrics** (selectable in the top header alongside the HPG logo and period controls):
   - **Units**: $\sum \text{Quantity}$ (formatted with 0–1 decimals).
   - **Value**: $\sum \text{Value}$ in EGP (formatted with thousands separators).
@@ -54,13 +55,6 @@ The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xls
     - **Gross Retention (GRR)**: $\frac{\sum_{\text{PY}_i > 0 \land \text{CY}_i > 0} \min(\text{CY}_i, \text{PY}_i)}{|\text{PY}_{\text{active}}|} \in [0, 1]$
     - **Lost Churn Rate**: $\frac{\sum_{\text{Lost}} \text{PY}_i}{|\text{PY}_{\text{active}}|}$ and **Contraction Rate**: $\frac{\sum_{\text{Retained, }\Delta_i < 0} |\Delta_i|}{|\text{PY}_{\text{active}}|}$ (satisfying $\text{GRR} + \text{Contraction Rate} + \text{Churn Rate} = 1$)
     - **New-Business Rate**: $\frac{\sum_{\text{New}} \text{CY}_i}{|\text{PY}_{\text{active}}|}$ (satisfying $\text{NRR} + \text{New-Business Rate} = 1 + g$)
-  - **Product × Customer-Segment Exposure (`ProductSegmentBreakdown`)**:
-    - For every `Item`, `Brand`, and `Line`, buckets each $(\text{product}, \text{customer})$ pair into the customer's overall lifecycle segment (`New`, `Growing`, `Stable`, `Declining`, `Lost`) so $\sum_{s} \Delta_{p,s} = \Delta_p$.
-    - Signed segment percentage-point contributions: $\text{Segment pp}_{p,s} = \frac{\Delta_{p,s}}{|\text{PY}_p|} \times 100$, summing across all 5 segments to the product's YoY % ($\text{New pp} + \text{Expansion pp} + \text{Stable pp} + \text{Contraction pp} + \text{Churn pp} = \text{YoY \%}_p$).
-  - **Customer-Behavior Decomposition of Product Growth (`decomposeCustomerBehavior`)**:
-    - Partitions each item's $\Delta_p$ across its own customers into:
-      $$\Delta_p = \underbrace{\sum_{\text{PY}_{p,c}=0,\text{CY}_{p,c}\neq 0} \Delta_{p,c}}_{\text{New Customer Effect}} + \underbrace{\sum_{\text{Retained},\Delta_{p,c}>0} \Delta_{p,c}}_{\text{Expansion Effect}} + \underbrace{\sum_{\text{Retained},\Delta_{p,c}\le 0} \Delta_{p,c}}_{\text{Contraction Effect}} + \underbrace{\sum_{\text{PY}_{p,c}\neq 0,\text{CY}_{p,c}=0} \Delta_{p,c}}_{\text{Lost Customer Effect}}$$
-    - `Brand` and `Line` effects are summed from item-level effects (`mergeCustomerBehaviorRows`), preserving $\text{New} + \text{Expansion} + \text{Contraction} + \text{Lost} = \Delta_p$.
 - **KPI Cards (`src/components/KpiCards.tsx`)**:
   - Displays 3 aligned KPI cards: Current Period (with Prior Period figure shown in the metadata below), YoY Growth %, and YoY Growth ($\Delta$).
   - Displays a live monthly CY-vs-PY mini sparkline under YoY Growth % comparing trends across the quarter.
@@ -71,7 +65,7 @@ The production workbook (`HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xls
 
 - **Guide Report Filters Bar (`src/components/Filters.tsx`)**:
   - Cascading product filter group (**Line** → **Brand** → **Product**) with searchable multi-select dropdowns (shared `src/components/SearchableMultiSelect.tsx`), removable summary chips, and a quick reset trigger. Selecting Lines scopes Brands; selecting Brands scopes Products.
-  - Separate **Distributor** multi-select group next to the product group. It filters the whole dashboard at transaction level (global `distributors` state, persisted in the `distributors=` URL hash and cleared by **Reset filters**). Its options exclude `EXCLUDED_DISTRIBUTORS` and are narrowed one-way by the Line / Brand / Product selection to Distributors with sales for those products anywhere in the dataset (`distributorOptions(meta, { lines, brands, items })`, backed by `meta.itemDistributors`); selected Distributors that no longer qualify are dropped automatically when the product selection changes.
+  - Separate **Distributor** checkbox filter group (`src/components/CheckboxMultiSelect.tsx`, backed by `src/lib/checkboxFilter.ts`) next to the product group. All Distributors in the dataset (including `Ezaby`, while `levels.distributor` keeps `EXCLUDED_DISTRIBUTORS` filtered internally) start **checked by default**; unchecking boxes excludes them immediately at transaction level (`excludeDistributors` / `distributors` in the store and `excludeDistributors=` / `distributors=` in the URL hash, cleared by **Reset filters**). Includes a master tri-state `Select all` checkbox, search box, per-row **Only** shortcut, local draft-empty handling when unchecking all items, smart **Excluding:** / **Distributor:** summary chips, and one-way product scoping (`distributorOptions(meta, { lines, brands, items })`, backed by `meta.itemDistributors`) that preserves exclude/include intent across product selection changes.
 - **Interactive Cross-Filter Chips (`src/components/DrillChips.tsx`)**:
   - Clicking bars, bubbles, treemap tiles, Growth Drivers rows, Defector Watchlist customers, or table filter buttons adds global cross-filter chips across `SubType`, `Chain`, `Distributor`, `Territory`, `Brick`, `Customer`, and `Item`.
 
@@ -90,12 +84,11 @@ Every visual on the dashboard includes: (1) an `sr-only` text summary alternativ
    - Plots `x = PY`, `y = YoY %`, `size = CY`, and `color = status` (`Growing`, `Declining`, `New`, `Lost`, `Flat`) across `SubType`, `Chains`, `Territory`, `Brick`, or `Customer`. Clicking any bubble adds a cross-filter drill chip.
 5. **CY Value Treemap Colored by Growth (`src/components/CyTreemap.tsx`)**:
    - Recharts `Treemap` where tile area is proportional to `CY Value` and tile fill reflects `YoY Value Growth %` via `treemapFillColor` from the shared palette (`src/lib/palette.ts`). Clicking any tile adds a drill chip.
-6. **Customer Dynamics — Retention, Cohort Bridge, Defector Watchlist & Product × Customer-Segment Exposure (`src/components/CustomerDynamics.tsx`, `src/components/ProductCustomerExposure.tsx`, `#section-customer-dynamics`)**:
-   - **Local SubType Multi-Select**: A searchable multi-select (with customer counts per SubType) in the section header narrows Customer Dynamics only, matching each customer's **primary** SubType. Its options come from the customers already shown, so they respect the global Guide Report filters. When several SubTypes are selected, a `Filtered by SubType: A, B +N more` notice offers a single **Show all SubTypes** reset.
+6. **Customer Dynamics — Retention, Cohort Bridge & Defector Watchlist (`src/components/CustomerDynamics.tsx`, `#section-customer-dynamics`)**:
+   - **Local SubType Checkbox Filter**: An Excel-style checkbox dropdown (`src/components/CheckboxMultiSelect.tsx`, with customer counts per SubType) in the section header starts with all SubTypes **checked by default**, narrowing Customer Dynamics only by each customer's **primary** SubType. Its options come from the customers already shown (respecting the global Guide Report filters) and preserve exclude/include intent when global filters change. Includes a per-row **Only** shortcut, local draft-empty handling when unchecking all items, and a smart `Excluding SubType: ...` / `Filtered by SubType: ...` banner notice with a single **Show all SubTypes** reset.
    - **4-Card Retention KPI Strip**: `Active Customers`, `Avg / Active (Value / Units)`, `Retained Growth Share`, and `New Customer Growth Share`. Every card includes an interactive **`KpiInfoTooltip`** (`i` icon popover) explaining its plain-English business meaning and exact calculation formula.
    - **Clickable 5-Segment Lifecycle Table**: Breaks down `New`, `Growing (>+5%)`, `Stable (±5%)`, `Declining (<-5%)`, and `Lost` customer cohorts with `PY`, `CY`, `YoY Δ`, `YoY %`, and `Contrib. %`. Clicking any row filters the Customer table below and smooth-scrolls to `#table-customer`.
    - **Top-10 Lost Customers Defector Watchlist**: Ranks the largest lost accounts by `PY Lost` and `Contrib. %`, supports inline expansion to inspect the exact items each defector bought in PY, one-click customer drill filtering, and `.xlsx` export (`Export watchlist` via `exportDefectorWatchlistToExcel`).
-   - **Product × Customer-Segment Exposure Matrix (`src/components/ProductCustomerExposure.tsx`)**: Lazy-loaded directly below `CustomerDynamics` inside `#section-customer-dynamics` with an `Item` / `Brand` / `Line` level selector (`pel=`), quick-view chips (`All`, `Top 10 churn-exposed`, `Top 10 new-customer-driven` persisted via `pev=`), `Chart / Table` toggle, sortable columns with `aria-sort` and `KpiInfoTooltip` headers, proportional 5-segment Δ bars, inline expandable 6-step Customer-Behavior Decomposition waterfall (`PY → +New → +Expansion → −Contraction → −Lost → CY`), and `.xlsx` export (`exportProductExposureToExcel`).
 
 ## Multi-Level Stacked Tables, Item Drill-Down & Excel Export
 
@@ -127,9 +120,9 @@ Each level table includes:
 
 1. **Granular Selectors (`useShallow`)**: Isolated Zustand store subscriptions prevent table re-renders when typing in the search boxes, toggling chart modes, or switching driver levels.
 2. **Concurrent Transitions (`useTransition`)**: Filter, period, and view switches are scheduled as low-priority transitions, keeping the user interface completely responsive.
-3. **Code-Splitting & Lazy Loading**: All chart and analytical sections (`GrowthDrivers`, `MonthChart`, `GrowthChart`, `BubbleScatterChart`, `CyTreemap`, `CustomerDynamics`, `ProductCustomerExposure`) are lazily loaded with `Suspense` skeletons and isolated by an `ErrorBoundary`.
+3. **Code-Splitting & Lazy Loading**: All chart and analytical sections (`GrowthDrivers`, `MonthChart`, `GrowthChart`, `BubbleScatterChart`, `CyTreemap`, `CustomerDynamics`) are lazily loaded with `Suspense` skeletons and isolated by an `ErrorBoundary`.
 4. **URL Hash Synchronization (`useSyncExternalStore`)**:
-   - Automatically synchronizes filter and view parameters in the URL hash (`metric`, `line`, `year`, `q`, `m`, `lfl`, `brands`, `items`, `mainTypes`, `subTypes`, `distributors`, `territories`, `txTypes`, `drill`, plus optional `dlv`, `pel`, `pev`, `ret`, and `hmm`).
+   - Automatically synchronizes filter and view parameters in the URL hash (`metric`, `line`, `year`, `q`, `m`, `lfl`, `brands`, `items`, `mainTypes`, `subTypes`, `distributors`, `excludeDistributors`, `territories`, `txTypes`, `drill`, plus optional `dlv`, `ret`, and `hmm`).
    - Uses `useSyncExternalStore` for browser navigation (Back/Forward) and validates all URL parameters against dataset metadata on load.
 5. **Color-Blind-Safe Theming (`src/lib/palette.ts`)**:
    - Okabe-Ito inspired `up` (`#0072B2`) and `down` (`#D55E00`) palette defined centrally in `tailwind.config.js` and exposed via CSS variables (`--color-up`, `--color-up-light`, `--color-up-vivid`, `--color-down`, `--color-down-light`, `--color-down-vivid`).
@@ -141,7 +134,8 @@ Each level table includes:
 - **SubType & Chain Normalization**:
   - Rows with `SubType = 'Ezzaby'` / `'Ezaby'` are normalized to `SubType = 'Chain'` and `Chain = 'Ezzaby'`, removing `'Ezzaby'` from `SubType` altogether and consolidating all Ezzaby sales under `Chain = 'Ezzaby'`.
   - Any row with a non-empty named `Chain` is normalized to `SubType = 'Chain'`, guaranteeing that `SubType = 'Chain'` and the `Chains` table reconcile 100%.
-  - Any customer having both `Stores` and `Private` across their transactions (in PY or CY) is normalized to `SubType = 'Stores'` across all rows.
+  - Non-chain rows with `SubType = 'Retail'` (case-insensitive, trimmed, across any `MainType`) are normalized to `SubType = 'Private'`, removing `'Retail'` completely everywhere (including the Customer table's `+N` badge) and running before the `Stores + Private` rule.
+  - Any customer having both `Stores` and `Private` (including normalized `Retail`) across their transactions (in PY or CY) is normalized to `SubType = 'Stores'` across all rows.
 - **Updated True Brick, Territory & SubType (CY)**: Each customer's `Brick`, `Territory`, and (for non-chain customers) `SubType` from their most recent sales period (CY first) are treated as their updated true attributes across all historical (PY) and current (CY) transactions, ensuring like-for-like comparisons and 100% reconciliation between the `SubType` table and `Customer Dynamics`. Prior bricks and prior subtypes are preserved in the `+N` tooltip badges on the Customer table.
 
 ## Changing `EXPANDABLE_SUBTYPES`
@@ -158,9 +152,9 @@ Any row under an expandable `SubType` whose `Chain` is empty/null is grouped int
 
 ```bash
 npm install          # Install dependencies
-npm run convert      # Stream-convert ../HPG Sales_SalesPerDistributorCustomerLevel Q3-2026.xlsx -> public/data/sales.json.gz
+npm run convert      # Stream-convert Py 2025 + Cy 2026 .xlsx workbooks -> public/data/sales.json.gz
 npm run dev          # Start Vite dev server
-npm run test         # Run Vitest acceptance & export test suite (35 tests across 2 files)
+npm run test         # Run Vitest unit, acceptance & export test suite (46 tests across 4 files)
 npm run typecheck    # Run TypeScript compiler check (tsc --noEmit)
 npm run build        # Typecheck and build production bundle to dist/
 ```

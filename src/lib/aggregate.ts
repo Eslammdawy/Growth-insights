@@ -21,28 +21,16 @@ import {
 } from './config';
 import { Dataset, StrColumn, numCol, strCol } from './columnar';
 import {
-  CUSTOMER_SEGMENTS,
-  CustomerBehaviorRow,
   CustomerInsights,
-  CustomerSegment,
   Growth,
-  Metric,
   PriceVolumeRow,
   PriceVolumeSummary,
-  ProductExposure,
-  ProductExposureByMetric,
-  ProductSegmentBreakdown,
   Sums,
-  addSums,
-  buildProductSegmentBreakdown,
-  classifyCustomerSegment,
   computeCustomerInsights,
   contributionPp,
-  decomposeCustomerBehavior,
   decomposePriceVolume,
   emptySums,
   growth,
-  mergeCustomerBehaviorRows,
   priceVolumeRow,
   shareOfTotal,
 } from './metrics';
@@ -121,6 +109,7 @@ export interface AnalysisQuery {
   mainTypes: string[];
   subTypes?: string[];
   distributors?: string[];
+  excludeDistributors?: string[];
   territories?: string[];
   drill: DrillChip[];
 }
@@ -220,8 +209,6 @@ export interface AnalysisResult {
   insights: AnalysisInsights;
   /** WI-4 customer lifecycle segments, active base, and retention metrics. */
   customerInsights: CustomerInsights;
-  /** Product × Customer-Segment Exposure & Customer-Behavior Growth Decomposition (Item / Brand / Line). */
-  productExposure: ProductExposure;
   /** One table per level. */
   levels: Record<Level, GroupRow[]>;
   /** Cascading filter options guided by upstream filter selections. */
@@ -427,11 +414,17 @@ export function prepare(ds: Dataset): Prepared {
   // Normalize SubType & Chain:
   // 1) Ezzaby/Ezaby SubType -> SubType='Chain', Chain='Ezzaby' (removes Ezzaby from SubType altogether).
   // 2) Any row with a named Chain -> SubType='Chain'.
+  // 3) Non-chain Retail SubType (case-insensitive, trimmed) -> SubType='Private'.
   const subTypeDict = [...rawSubType.dict];
   let chainSubCode = subTypeDict.indexOf('Chain');
   if (chainSubCode < 0) {
     chainSubCode = subTypeDict.length;
     subTypeDict.push('Chain');
+  }
+  let privateSubCode = subTypeDict.indexOf('Private');
+  if (privateSubCode < 0) {
+    privateSubCode = subTypeDict.length;
+    subTypeDict.push('Private');
   }
   const chainDict = [...rawChain.dict];
   let ezzabyChainCode = chainDict.indexOf('Ezzaby');
@@ -440,9 +433,11 @@ export function prepare(ds: Dataset): Prepared {
     chainDict.push('Ezzaby');
   }
   const isEzzabySubCode = new Uint8Array(rawSubType.dict.length);
+  const isRetailSubCode = new Uint8Array(rawSubType.dict.length);
   rawSubType.dict.forEach((s, k) => {
     const low = s.trim().toLowerCase();
     if (low === 'ezzaby' || low === 'ezaby') isEzzabySubCode[k] = 1;
+    else if (low === 'retail') isRetailSubCode[k] = 1;
   });
   const isNamedChainCode = new Uint8Array(rawChain.dict.length);
   rawChain.dict.forEach((s, k) => {
@@ -462,14 +457,17 @@ export function prepare(ds: Dataset): Prepared {
     } else if (isNamedChainCode[ch]) {
       normSubCodes[i] = chainSubCode;
       normChainCodes[i] = ch;
+    } else if (isRetailSubCode[st]) {
+      normSubCodes[i] = privateSubCode;
+      normChainCodes[i] = 0;
     } else {
       normSubCodes[i] = st;
       normChainCodes[i] = 0;
     }
   }
 
-  // 3) If a customer has both Stores (or Store) and Private across active transactions (in PY or CY),
-  //    normalize all of their Private rows to Stores before customer-attribute computation.
+  // 4) If a customer has both Stores (or Store) and Private (including normalized Retail) across active
+  //    transactions (in PY or CY), normalize all of their Private rows to Stores before customer-attribute computation.
   const isStoresSubCode = new Uint8Array(subTypeDict.length);
   const isPrivateSubCode = new Uint8Array(subTypeDict.length);
   let storesTargetCode = subTypeDict.indexOf('Stores');
@@ -735,7 +733,6 @@ function computeCustomers(
 export function buildMeta(ds: Dataset): DatasetMeta {
   const p = prepare(ds);
   const { line, brand, item, mainType, subType, distributor, territory, transactionType } = p.c;
-  const excludedDistributors = new Set(EXCLUDED_DISTRIBUTORS.map((d) => d.trim().toLowerCase()));
   const triples = new Set<string>();
   const tripleList: [string, string, string][] = [];
   const channelPairs = new Set<string>();
@@ -760,7 +757,7 @@ export function buildMeta(ds: Dataset): DatasetMeta {
     lineUsed[l] = 1;
     if (mt > 0) mtUsed[mt] = 1;
     if (st > 0) stUsed[st] = 1;
-    if (d > 0 && !excludedDistributors.has(distributor.dict[d].trim().toLowerCase())) {
+    if (d > 0) {
       distUsed[d] = 1;
       const idKey = `${it}|${d}`;
       if (!itemDistPairs.has(idKey)) {
@@ -824,7 +821,7 @@ export function subTypeOptions(
 }
 
 /**
- * Distributor options (excluding EXCLUDED_DISTRIBUTORS) and, when a
+ * Distributor options across the dataset (including Ezaby) and, when a
  * product scope is given, narrowed to Distributors with sales (whole dataset) for the selected
  * Line(s) / Brand(s) / Product(s).
  */
@@ -888,6 +885,14 @@ function mask(col: StrColumn, values: string[] | null | undefined): Uint8Array |
   const set = new Set(values.map((v) => v.trim()));
   const m = new Uint8Array(col.dict.length);
   for (let k = 0; k < col.dict.length; k++) if (set.has(col.dict[k])) m[k] = 1;
+  return m;
+}
+
+function excludeMask(col: StrColumn, values: string[] | null | undefined): Uint8Array | null {
+  if (!values || !values.length) return null;
+  const set = new Set(values.map((v) => v.trim()));
+  const m = new Uint8Array(col.dict.length).fill(1);
+  for (let k = 0; k < col.dict.length; k++) if (set.has(col.dict[k])) m[k] = 0;
   return m;
 }
 
@@ -967,7 +972,10 @@ function buildContext(ds: Dataset, query: AnalysisQuery): QueryContext {
 
   const mtMask = mask(c.mainType, query.mainTypes);
   const stMask = mask(c.subType, query.subTypes);
-  const distMask = mask(c.distributor, query.distributors);
+  const distMask =
+    query.distributors && query.distributors.length > 0
+      ? mask(c.distributor, query.distributors)
+      : excludeMask(c.distributor, query.excludeDistributors);
   const terrMask = mask(c.territory, query.territories);
 
   const globalMasks: Masks = [...drillMasks];
@@ -1114,10 +1122,6 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   const brickCodes = c.brick.codes;
   const terrCodes = c.territory.codes;
   const itemCodes = c.item.codes;
-  const custCodes = c.customer.codes;
-  const nCust = c.customer.dict.length;
-  // Sparse Item × Customer accumulator for ProductExposure & Customer-Behavior Decomposition
-  const itemCustMap = new Map<number, Sums>();
 
   const { qty, val, tx, periodIdx } = p;
   const lineCodes = c.line.codes;
@@ -1205,21 +1209,6 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     }
     itemCnt[it]++;
 
-    const cu = custCodes[i];
-    const icKey = it * nCust + cu;
-    let icSums = itemCustMap.get(icKey);
-    if (!icSums) {
-      icSums = emptySums();
-      itemCustMap.set(icKey, icSums);
-    }
-    if (f === 2) {
-      icSums.cyQ += q;
-      icSums.cyV += v;
-    } else {
-      icSums.pyQ += q;
-      icSums.pyV += v;
-    }
-
     for (let j = 0; j < nl; j++) {
       const la = levelAccs[j];
       const g = la.col.codes[i];
@@ -1284,7 +1273,7 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     lines: collectOpts(c.line, lineUsed, activeLines ?? undefined),
     mainTypes: collectOpts(c.mainType, mtUsed, query.mainTypes),
     subTypes: collectOpts(c.subType, stUsed, query.subTypes),
-    distributors: collectOpts(c.distributor, distUsed, query.distributors, excludedDistributors),
+    distributors: collectOpts(c.distributor, distUsed, query.distributors),
     territories: collectOpts(c.territory, terrUsed, query.territories),
     brands: collectOpts(c.brand, brandUsed, query.brands),
     items: collectOpts(c.item, itemUsed, query.items),
@@ -1454,17 +1443,6 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
   }));
 
   const customerInsights = computeCustomerInsights(levels.customer);
-  const custAcc = levelAccs.find((la) => la.level === 'customer')!;
-  const productExposure = buildProductExposure(
-    p,
-    nItem,
-    nCust,
-    itemAcc,
-    itemCnt,
-    custAcc.acc,
-    custAcc.cnt,
-    itemCustMap,
-  );
 
   return {
     period,
@@ -1474,239 +1452,11 @@ export function analyze(ds: Dataset, query: AnalysisQuery): AnalysisResult {
     territoryMonths,
     insights,
     customerInsights,
-    productExposure,
     levels,
     filterOptions,
     lines,
     linesTotal,
     matchedRows: matched,
-  };
-}
-
-const emptySegmentMap = (): Record<CustomerSegment, Sums> => ({
-  new: emptySums(),
-  growing: emptySums(),
-  stable: emptySums(),
-  declining: emptySums(),
-  lost: emptySums(),
-});
-
-function buildProductExposureForMetric(
-  p: Prepared,
-  nItem: number,
-  nCust: number,
-  itemAcc: Float64Array,
-  itemCnt: Int32Array,
-  custAcc: Float64Array,
-  custCnt: Int32Array,
-  itemCustMap: Map<number, Sums>,
-  metric: Metric,
-): ProductExposureByMetric {
-  const c = p.c;
-
-  // 1. Classify each customer's overall lifecycle segment for this metric
-  const custSeg: CustomerSegment[] = new Array(nCust);
-  for (let cu = 0; cu < nCust; cu++) {
-    if (!custCnt[cu]) {
-      custSeg[cu] = 'stable';
-    } else {
-      custSeg[cu] = classifyCustomerSegment(sumsAt(custAcc, cu), metric);
-    }
-  }
-
-  // 2. Per-item 5-segment sums & per-customer pairs for Enhancement 2
-  const itemSegments = new Map<number, Record<CustomerSegment, Sums>>();
-  const itemPairs = new Map<number, Sums[]>();
-
-  for (const [icKey, pairSums] of itemCustMap) {
-    const it = Math.floor(icKey / nCust);
-    const cu = icKey - it * nCust;
-    const seg = custSeg[cu];
-
-    let segMap = itemSegments.get(it);
-    if (!segMap) {
-      segMap = emptySegmentMap();
-      itemSegments.set(it, segMap);
-    }
-    addSums(segMap[seg], pairSums);
-
-    let pairs = itemPairs.get(it);
-    if (!pairs) {
-      pairs = [];
-      itemPairs.set(it, pairs);
-    }
-    pairs.push(pairSums);
-  }
-
-  // 3. Build Item-level breakdowns and roll up to Brand & Line
-  const itemBreakdowns: ProductSegmentBreakdown[] = [];
-  const brandAgg = new Map<
-    number,
-    {
-      brandName: string;
-      lineName: string | undefined;
-      segments: Record<CustomerSegment, Sums>;
-      totals: Sums;
-      behaviors: CustomerBehaviorRow[];
-    }
-  >();
-  const lineAgg = new Map<
-    number,
-    {
-      lineName: string;
-      segments: Record<CustomerSegment, Sums>;
-      totals: Sums;
-      behaviors: CustomerBehaviorRow[];
-    }
-  >();
-
-  for (let it = 0; it < nItem; it++) {
-    if (!itemCnt[it]) continue;
-    const name = c.item.dict[it];
-    const bCode = p.itemBrand[it];
-    const lCode = p.itemLine[it];
-    const brandName = bCode >= 0 ? c.brand.dict[bCode] : undefined;
-    const lineName = lCode > 0 ? c.line.dict[lCode] : undefined;
-
-    const totals = sumsAt(itemAcc, it);
-    const segments = itemSegments.get(it) ?? emptySegmentMap();
-    const py = metric === 'units' ? totals.pyQ : totals.pyV;
-    const cb = decomposeCustomerBehavior(itemPairs.get(it) ?? [], py, metric);
-
-    itemBreakdowns.push(
-      buildProductSegmentBreakdown({
-        itemId: `Item:${name}`,
-        itemLabel: name || UNASSIGNED_LABEL,
-        level: 'item',
-        brand: brandName,
-        line: lineName,
-        segments,
-        totals,
-        customerBehavior: cb,
-        metric,
-      }),
-    );
-
-    const bKey = bCode >= 0 ? bCode : 0;
-    let bEntry = brandAgg.get(bKey);
-    if (!bEntry) {
-      bEntry = {
-        brandName: brandName || UNASSIGNED_LABEL,
-        lineName,
-        segments: emptySegmentMap(),
-        totals: emptySums(),
-        behaviors: [],
-      };
-      brandAgg.set(bKey, bEntry);
-    }
-    addSums(bEntry.totals, totals);
-    for (const seg of CUSTOMER_SEGMENTS) {
-      addSums(bEntry.segments[seg], segments[seg]);
-    }
-    bEntry.behaviors.push(cb);
-
-    const lKey = lCode > 0 ? lCode : 0;
-    let lEntry = lineAgg.get(lKey);
-    if (!lEntry) {
-      lEntry = {
-        lineName: lineName || UNASSIGNED_LABEL,
-        segments: emptySegmentMap(),
-        totals: emptySums(),
-        behaviors: [],
-      };
-      lineAgg.set(lKey, lEntry);
-    }
-    addSums(lEntry.totals, totals);
-    for (const seg of CUSTOMER_SEGMENTS) {
-      addSums(lEntry.segments[seg], segments[seg]);
-    }
-    lEntry.behaviors.push(cb);
-  }
-
-  const brandBreakdowns: ProductSegmentBreakdown[] = [];
-  for (const [, bEntry] of brandAgg) {
-    const py = metric === 'units' ? bEntry.totals.pyQ : bEntry.totals.pyV;
-    const cb = mergeCustomerBehaviorRows(bEntry.behaviors, py);
-    brandBreakdowns.push(
-      buildProductSegmentBreakdown({
-        itemId: `Brand:${bEntry.brandName}`,
-        itemLabel: bEntry.brandName,
-        level: 'brand',
-        brand: bEntry.brandName,
-        line: bEntry.lineName,
-        segments: bEntry.segments,
-        totals: bEntry.totals,
-        customerBehavior: cb,
-        metric,
-      }),
-    );
-  }
-
-  const lineBreakdowns: ProductSegmentBreakdown[] = [];
-  for (const [, lEntry] of lineAgg) {
-    const py = metric === 'units' ? lEntry.totals.pyQ : lEntry.totals.pyV;
-    const cb = mergeCustomerBehaviorRows(lEntry.behaviors, py);
-    lineBreakdowns.push(
-      buildProductSegmentBreakdown({
-        itemId: `Line:${lEntry.lineName}`,
-        itemLabel: lEntry.lineName,
-        level: 'line',
-        line: lEntry.lineName,
-        segments: lEntry.segments,
-        totals: lEntry.totals,
-        customerBehavior: cb,
-        metric,
-      }),
-    );
-  }
-
-  return {
-    byLevel: {
-      item: itemBreakdowns,
-      brand: brandBreakdowns,
-      line: lineBreakdowns,
-    },
-  };
-}
-
-function buildProductExposure(
-  p: Prepared,
-  nItem: number,
-  nCust: number,
-  itemAcc: Float64Array,
-  itemCnt: Int32Array,
-  custAcc: Float64Array,
-  custCnt: Int32Array,
-  itemCustMap: Map<number, Sums>,
-): ProductExposure {
-  const byValue = buildProductExposureForMetric(
-    p,
-    nItem,
-    nCust,
-    itemAcc,
-    itemCnt,
-    custAcc,
-    custCnt,
-    itemCustMap,
-    'value',
-  );
-  const byUnits = buildProductExposureForMetric(
-    p,
-    nItem,
-    nCust,
-    itemAcc,
-    itemCnt,
-    custAcc,
-    custCnt,
-    itemCustMap,
-    'units',
-  );
-  return {
-    ...byValue,
-    byMetric: {
-      value: byValue,
-      units: byUnits,
-    },
   };
 }
 
